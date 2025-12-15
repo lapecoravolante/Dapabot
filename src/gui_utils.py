@@ -12,8 +12,7 @@ def inizializza():
     # tutti i provider supportati
     if "providers" not in st.session_state.keys():
         st.session_state.providers={"Huggingface": HuggingfaceProvider(), 
-                                    "Openrouter": OpenRouterProvider(), 
-                                    "Provider Locale": LocalProvider()} 
+                                    "Openrouter": OpenRouterProvider()} 
         
     providers = st.session_state.providers # shortcut per il nome della variabile
     providers_disponibili = {} # tutti i provider raggiungibili via rete
