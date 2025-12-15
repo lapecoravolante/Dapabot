@@ -5,7 +5,6 @@ import extra_streamlit_components as stx
 from Messaggio import Messaggio
 from HuggingfaceProvider import HuggingfaceProvider
 from OpenRouterProvider import OpenRouterProvider
-from LocalProvider import LocalProvider
 
 def inizializza():
     cookie_controller = CookieController()
