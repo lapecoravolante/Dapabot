@@ -1,0 +1,23 @@
+[project]
+name = "dapabot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "assemblyai>=0.46.0",
+    "docx2txt>=0.9",
+    "extra-streamlit-components>=0.1.81",
+    "langchain>=1.0.7",
+    "langchain-chroma>=1.0.0",
+    "langchain-community>=0.4.1",
+    "langchain-core>=1.0.5",
+    "langchain-docling>=2.0.0",
+    "langchain-huggingface>=1.0.1",
+    "langchain-openai>=1.0.3",
+    "openpyxl>=3.1.5",
+    "python-magic>=0.4.27",
+    "sentence-transformers>=5.1.2",
+    "streamlit>=1.51.0",
+    "streamlit-cookies-controller>=0.0.4",
+]
