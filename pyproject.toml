@@ -6,8 +6,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "assemblyai>=0.46.0",
+    "docling>=2.63.0",
     "docx2txt>=0.9",
     "extra-streamlit-components>=0.1.81",
+    "huggingface-hub>=0.36.0",
     "langchain>=1.0.7",
     "langchain-chroma>=1.0.0",
     "langchain-community>=0.4.1",
@@ -20,4 +22,5 @@ dependencies = [
     "sentence-transformers>=5.1.2",
     "streamlit>=1.51.0",
     "streamlit-cookies-controller>=0.0.4",
+    "validators>=0.35.0",
 ]

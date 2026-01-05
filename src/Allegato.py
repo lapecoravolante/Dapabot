@@ -5,3 +5,10 @@ class Allegato():
         self.tipo=tipo
         self.contenuto=contenuto
         self.mime_type=mime_type
+        
+    def to_dict(self):
+        return {
+            "tipo": self.tipo,
+            "contenuto": self.contenuto,
+            "mime_type": self.mime_type
+            }
