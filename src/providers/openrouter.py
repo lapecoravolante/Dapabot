@@ -12,16 +12,21 @@ class OpenRouterProvider(Provider):
         try:
             modelli=[]
             url=self._base_url+f"/{url}"
-            json_list = requests.get(url).json().get("data", [])
+            response=requests.get(url, timeout=10)
+            response.raise_for_status()
+            json_list = response.json().get("data", [])
             for modello in json_list:
                 pricing = modello.get("pricing", {})
                 prompt_cost = pricing.get("prompt", None)
                 completion_cost = pricing.get("completion", None)
                 if prompt_cost == "0" and completion_cost == "0":
                     modelli.append(modello["id"])
-            return modelli
+            self.set_disponibile(True)
         except:
-            return []
+            self.set_disponibile(False)
+            modelli.clear()
+        finally:
+            return modelli
     
     def lista_modelli(self, api_key=""):
         if self._modelli:  # caching

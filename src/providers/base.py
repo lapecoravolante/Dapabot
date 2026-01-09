@@ -20,7 +20,7 @@ class Provider(ABC):
         self._cronologia_messaggi = {} # dizionario che associa un modello alla sua cronologia dei messaggi
         self._modello_scelto = ""
         self._motore_di_embedding=None
-        self._disponibile=False # mi dice se il provider è raggiungibile via rete o temporaneamente irragiungibile
+        self.set_disponibile(False) # mi dice se il provider è raggiungibile via rete o temporaneamente irragiungibile
         self._rag : Rag = Rag()
         # carico l'eventuale configurazione da file su disco        
         configurazione = Configurazione().get_all()[Configurazione.PROVIDERS_KEY]
@@ -52,6 +52,15 @@ class Provider(ABC):
             }
         }
         
+    def get_prefisso_token(self):
+        return self._prefisso_token
+    
+    def set_modello_scelto(self, modello):
+        if modello:
+            self._modello_scelto=modello
+            if modello not in self._cronologia_messaggi:
+                self._cronologia_messaggi[modello]=[]
+        
     def set_baseurl(self, base_url):
         if (validators.url(base_url)):
             self._base_url=base_url
@@ -72,12 +81,11 @@ class Provider(ABC):
     def get_rag(self):
         return self._rag
         
-    def _controlla_api_key(self, api_key):
-        if (self._api_key=="" or api_key==self._prefisso_token) and api_key=="":
-            raise Exception("API_KEY non valida!")
-        if (self._api_key=="" or self._api_key==self._prefisso_token) and api_key!="":
+    def set_apikey(self, api_key: str):
+        if api_key is not None and api_key.startswith(self._prefisso_token):
             self._api_key=api_key
-        return True
+        else:
+            raise Exception(f"L'API KEY inserita non inizia con \"{self._prefisso_token}\"")
        
     def set_disponibile(self, disponibile):
         self._disponibile=disponibile
@@ -93,7 +101,7 @@ class Provider(ABC):
 
     def get_apikey(self):
         return self._api_key
-    
+               
     def get_modello_scelto(self):
         return self._modello_scelto
     
@@ -102,18 +110,21 @@ class Provider(ABC):
         if self._modello_scelto == modello and self._api_key == api_key and self._client:
             return self._client
         try:
-            self._controlla_api_key(api_key=api_key)
+            self.set_apikey(api_key=api_key)
             self._client=self._crea_client(base_url=self._base_url, modello=modello, api_key=api_key)
             self._modello_scelto = modello
             if modello not in self._cronologia_messaggi:
                 self._cronologia_messaggi[modello]=[]
+            self.set_disponibile(True)
         except Exception as errore:
+            self.set_disponibile(False)
+            self._client=None
             raise Exception(errore)
     
     def invia_messaggi(self, messaggi: list[Messaggio]):
         """Invia i messaggi al modello multimodale e aggiorna la cronologia."""
         if not self._modello_scelto:
-            raise Exception("Client non inizializzato. Chiama prima set_client().")
+            raise Exception("Client non inizializzato. Inserisci un'API KEY valida e scegli un modello.")
         cronologia_modello = self._cronologia_messaggi[self._modello_scelto]
         messaggi_da_inviare = []  
         preambolo_rag=" \nRispondi dando priorità al contesto fornito di seguito: \n"

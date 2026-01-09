@@ -329,7 +329,7 @@ class Rag():
             collection_dir = os.path.join(self._persist_dir, collection_name)
             vectorstore = Chroma(
                 collection_name=collection_name,
-                embedding=self._motore_di_embedding,
+                embedding_function=self._motore_di_embedding,
                 persist_directory=collection_dir,
             )
 

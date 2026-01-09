@@ -6,7 +6,7 @@ import requests, logging
 
 class HuggingfaceProvider(Provider):
        
-    def __init__(self, nome="Huggingface", prefisso_token="hf_", base_url="https://router.huggingface.co/v1"):
+    def __init__(self, nome="HuggingFace", prefisso_token="hf_", base_url="https://router.huggingface.co/v1"):
         super().__init__(nome=nome, prefisso_token=prefisso_token, base_url=base_url)
         # Silenzia i log di sentence-transformers
         logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
@@ -23,10 +23,11 @@ class HuggingfaceProvider(Provider):
                 modello["id"]
                 for modello in response.json().get("data", [])                
             ])
-            return self._modelli
         except Exception as errore:
             print(f"Errore nel caricamento dei modelli da Hugging Face: {errore}")
-            return []
+            self._modelli.clear()
+        finally:
+            return self._modelli
     
     def lista_modelli_rag(self):
         """Ritorna solo i modelli di tipo 'text-generation' disponibili su Hugging Face."""
@@ -35,9 +36,11 @@ class HuggingfaceProvider(Provider):
         try:
             modelli = list_models(filter="sentence-transformers")                
             self._modelli_rag=[m.modelId for m in modelli]
+            self.set_disponibile(True)
         except Exception as errore:
             print(f"Errore nel caricamento dei modelli da Hugging Face: {errore}")
-            self._modelli_rag=[]
+            self._modelli_rag.clear()
+            self.set_disponibile(False)
         finally:
             return self._modelli_rag
 
