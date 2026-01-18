@@ -5,9 +5,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from src.Messaggio import Messaggio
 from src.Allegato import Allegato
-from src.Configurazione import Configurazione
 import os, logging, hashlib, json, shutil
-from typing import Dict, Literal, Tuple
+from typing import Dict, Tuple
 
 class Rag():
     
@@ -17,17 +16,18 @@ class Rag():
     DEFAULT_EMBEDDING_ENGINE=HuggingFaceEmbeddings
     DEFAULT_VECTORSTORE_PATH = "vectorstore_cache/"  # dove vengono persistiti i vector store
     DEFAULT_VECTORSTORE_INDEX_FILE="index.json"
+    DEFAULT_VECTORSTORE_INDEX_FILE_PATH = os.path.join(DEFAULT_VECTORSTORE_PATH, DEFAULT_VECTORSTORE_INDEX_FILE)
     AVAILABLE_SEARCH_MODALITIES=["similarity", "mmr"]
     
     # cache dei vectorstore per file già elaborati
     _cache_vectorstores: Dict[Tuple, Chroma] = {}
-    # Configurazione dell'applicazione
-    configurazione = Configurazione().get(Configurazione.RAG_KEY)
+    # indice su disco della cache dei vectorstore
+    _indice_vectorstores: Dict[Tuple, Dict[str, str]] = {}
     
     _pulizia_fatta = False  # esegue la pulizia solo una volta per processo
     
     def __init__(self, attivo=False, modello=None, upload_dir=None, topk=None, 
-                 motore_di_embedding=None, tokenizer="", vectorstore_cache_path="", modalita_ricerca="similarity"):
+                 motore_di_embedding=None, tokenizer="", modalita_ricerca="similarity"):
         # Silenzia i log di sentence-transformers
         logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
         logging.getLogger("sentence_transformers.SentenceTransformer").setLevel(logging.ERROR)
@@ -38,7 +38,7 @@ class Rag():
         self.set_motore_di_embedding(motore_di_embedding) 
         self.set_attivo(attivo) 
         self.set_tokenizer(tokenizer)
-        self.set_vectorstore_cache_path(vectorstore_cache_path) # Directory di persistenza (per provider)
+        self.init_vectorstore_cache() # inizializza la cache e la directory per la persistenza dei vectorstores
         self.set_modalita_ricerca(modalita_ricerca)
 
     def to_dict(self):
@@ -46,7 +46,7 @@ class Rag():
             "modello": self._modello,
             "directory_allegati": self._upload_dir,
             "top_k": self._topk,
-            "directory_vectorstores": self._persist_dir,
+            "directory_vectorstores": Rag.DEFAULT_VECTORSTORE_PATH,
             "modalita_ricerca": self._modalita_ricerca
         }
         
@@ -59,35 +59,29 @@ class Rag():
     def get_modalita_ricerca(self):
         return self._modalita_ricerca
 
-    def _pulizia_orfani(self) -> None:
+    @classmethod
+    def _pulizia_orfani(cls) -> None:
         """
-        Rimuove le directory orfane dentro self._persist_dir, cioè quelle 
+        Rimuove le directory orfane dentro Rag.DEFAULT_VECTORSTORE_PATH, cioè quelle 
         che non corrispondono a nessuna 'collection_name' nell'indice JSON.
         Esegue la pulizia una sola volta per processo.
         """
-        if Rag._pulizia_fatta:
+        if cls._pulizia_fatta or not os.path.isdir(cls.DEFAULT_VECTORSTORE_PATH):
+            cls._pulizia_fatta=True
             return
         try:
-            indice = self.get_indice_collezioni() or {}
+            indice = cls.get_indice()
             # Directory "attese": <persist_dir>/<collection_name>
             attese = set()
 
             for _, entry in indice.items():
-                if isinstance(entry, dict):
-                    cn = entry.get("collection_name", "")
-                else:
-                    cn = str(entry)
+                cn = entry.get("collection_name", "")
                 if cn:
                     attese.add(cn)
 
-            # Se la persist dir non esiste, nulla da fare
-            if not os.path.isdir(self._persist_dir):
-                Rag._pulizia_fatta = True
-                return
-
             # Scansiona solo sottocartelle (non file come chroma.sqlite3)
-            for nome in os.listdir(self._persist_dir):
-                percorso = os.path.join(self._persist_dir, nome)
+            for nome in os.listdir(cls.DEFAULT_VECTORSTORE_PATH):
+                percorso = os.path.join(cls.DEFAULT_VECTORSTORE_PATH, nome)
                 if not os.path.isdir(percorso):
                     continue
                 if nome not in attese:
@@ -98,22 +92,29 @@ class Rag():
                         logging.warning(f"[RAG] Impossibile rimuovere {percorso}: {e}")
 
         except Exception as e:
-            logging.warning(f"[RAG] Errore pulizia orfani in '{self._persist_dir}': {e}")
+            logging.warning(f"[RAG] Errore pulizia orfani in '{Rag.DEFAULT_VECTORSTORE_PATH}': {e}")
         finally:
             # In ogni caso segna come eseguito per evitare più passaggi
-            Rag._pulizia_fatta = True
+            cls._pulizia_fatta = True
+
+    @classmethod
+    def get_indice(cls) -> dict:
+        """
+        Ritorna l'indice dei vectorstore. Se la cache RAM è vuota (es. dopo rerun Streamlit), ricarica automaticamente da disco.
+        """
+        if not cls._indice_vectorstores:
+            cls._indice_vectorstores = cls.carica_indice_vectorstores() or {}
+        return cls._indice_vectorstores
 
     # crea la directory dove vengono memorizzati i vectorstore
-    def set_vectorstore_cache_path(self, path: str):
-        self._persist_dir = path or os.path.join(Rag.DEFAULT_VECTORSTORE_PATH, "default")
-        os.makedirs(self._persist_dir, exist_ok=True)
-        self._indice_vectorestore_path = os.path.join(self._persist_dir, Rag.DEFAULT_VECTORSTORE_INDEX_FILE)
-        self._indice_collezioni = self.carica_indice_collezioni()
-
-        if not isinstance(Rag._cache_vectorstores, dict):
-            Rag._cache_vectorstores = {}
+    @classmethod
+    def init_vectorstore_cache(cls):
         # Pulizia one-shot delle directory orfane
-        self._pulizia_orfani()
+        cls._pulizia_orfani()
+        # se non esiste creo la directory per io vectorstores
+        os.makedirs(cls.DEFAULT_VECTORSTORE_PATH, exist_ok=True)
+        # inizializzo la cache in RAM
+        cls.get_indice()
 
     # imposta i parametri per il chunker: 
     # tokenizer: il tokenizzatore da usare
@@ -208,14 +209,6 @@ class Rag():
                 raise Exception(f"Errore nel parsing del testo semplice: {e}")
         return clean_splits
     
-
-    def _key_str(self, vectorstore_id: Tuple) -> str:
-        """
-        Serializza in modo deterministico il vectorstore_id (tuple) in una stringa,
-        da usare come chiave sia in RAM sia nell’indice JSON.
-        """
-        return json.dumps(vectorstore_id, ensure_ascii=False)
-
     def _genera_nome_collezione(self, vectorstore_id: Tuple) -> str:
         """
         Genera un nome di collection deterministico e stabile a partire dal vectorstore_id.
@@ -227,19 +220,19 @@ class Rag():
         Recupera (o crea) il vectorstore della collection usando una cartella
         di persistenza dedicata: <persist_dir>/<collection_name>/.
         """
-        key = self._key_str(vectorstore_id)
+        # Trasforma la tupla "vectorstore_id" in una stringa da usare come chiave sia in RAM sia nell’indice JSON.
+        key = json.dumps(vectorstore_id, ensure_ascii=False)
 
         # 1) Cache RAM
         if key in Rag._cache_vectorstores:
             return Rag._cache_vectorstores[key]
 
         # 2) Prova dall'indice (collection_name già noto)
-        entry = self._indice_collezioni.get(key)  # dict {"collection_name": str, "label": str}
-        collection_name = entry["collection_name"] if isinstance(entry, dict) else None
-
+        vs = Rag.get_indice().get(key)  # dict {"collection_name": str, "label": str}
+        collection_name = vs.get("collection_name") if vs else None
         if collection_name:
             # ✅ cartella dedicata per la collection
-            collection_dir = os.path.join(self._persist_dir, collection_name)
+            collection_dir = os.path.join(Rag.DEFAULT_VECTORSTORE_PATH, collection_name)
             os.makedirs(collection_dir, exist_ok=True)
             try:
                 vectorstore = Chroma(
@@ -253,7 +246,7 @@ class Rag():
             Rag._cache_vectorstores[key] = vectorstore
 
             # Se la label non è presente, prova a ricostruirla interrogando metadati
-            label = entry.get("label", "") if isinstance(entry, dict) else ""
+            label = vs.get("label", "")
             if not label:
                 try:
                     coll = getattr(vectorstore, "_collection", None)
@@ -268,9 +261,9 @@ class Rag():
                     pass
 
                 if label:
-                    self._indice_collezioni[key] = {"collection_name": collection_name, "label": label}
+                    Rag.get_indice()[key] = {"collection_name": collection_name, "label": label}
                     try:
-                        self.salva_indice_collezioni()
+                        Rag.salva_indice_vectorstores()
                     except Exception as e:
                         logging.warning(f"Non riesco a salvare l'indice con label: {e}")
 
@@ -281,16 +274,15 @@ class Rag():
         collection_name = self._genera_nome_collezione(vectorstore_id)
 
         # ✅ cartella dedicata per la collection
-        collection_dir = os.path.join(self._persist_dir, collection_name)
+        collection_dir = os.path.join(Rag.DEFAULT_VECTORSTORE_PATH, collection_name)
         os.makedirs(collection_dir, exist_ok=True)
 
         try:
-            # Passa l’oggetto embeddings come argomento posizionale
             vectorstore = Chroma.from_documents(
                 splits,
                 self._motore_di_embedding,
                 collection_name=collection_name,
-                persist_directory=collection_dir,  # per-collection
+                persist_directory=collection_dir
             )
         except Exception as e:
             raise Exception(f"Errore creazione collection '{collection_name}': {e}")
@@ -298,15 +290,14 @@ class Rag():
         Rag._cache_vectorstores[key] = vectorstore
 
         # Calcolo label utente (basename del file) dai metadati
-        label = self._estrai_label_da_splits(splits)
-        self._indice_collezioni[key] = {"collection_name": collection_name, "label": label}
+        label = Rag._estrai_label_da_splits(splits)
+        Rag.get_indice()[key] = {"collection_name": collection_name, "label": label}
         try:
-            self.salva_indice_collezioni()
+            Rag.salva_indice_vectorstores()
         except Exception as e:
             logging.warning(f"Non riesco a salvare l'indice dei vector store: {e}")
 
         return vectorstore
-
 
     def delete_vectorstore(self, vectorstore_id_str: str) -> bool:
         """
@@ -314,19 +305,16 @@ class Rag():
         Non rimuove i file su disco: la pulizia avverrà all'avvio tramite
         il metodo pulizia_orfani().
         """
-        entry = self._indice_collezioni.get(vectorstore_id_str)
-        collection_name = None
-        if isinstance(entry, dict):
-            collection_name = entry.get("collection_name")
-        elif isinstance(entry, str):
-            collection_name = entry
-
+        entry = Rag.get_indice().get(vectorstore_id_str)
+        if not entry:
+            logging.warning(f"[RAG] delete_vectorstore: id non trovato nell'indice: {vectorstore_id_str}")
+            return False
+        collection_name = entry.get("collection_name")
         if not collection_name:
             return False
-
         try:
             # Apri la collection usando la sua cartella dedicata (persistenza per-collection)
-            collection_dir = os.path.join(self._persist_dir, collection_name)
+            collection_dir = os.path.join(Rag.DEFAULT_VECTORSTORE_PATH, collection_name)
             vectorstore = Chroma(
                 collection_name=collection_name,
                 embedding_function=self._motore_di_embedding,
@@ -337,7 +325,7 @@ class Rag():
             if client is None:
                 raise RuntimeError("Client interno Chroma non disponibile.")
 
-            # Delete logica lato DB
+            # Delete logica sul DB
             client.delete_collection(name=collection_name)
 
         except Exception as e:
@@ -345,14 +333,15 @@ class Rag():
 
         # Aggiorna cache e indice
         Rag._cache_vectorstores.pop(vectorstore_id_str, None)
-        self._indice_collezioni.pop(vectorstore_id_str, None)
+        Rag.get_indice().pop(vectorstore_id_str, None)
         try:
-            self.salva_indice_collezioni()
+            Rag.salva_indice_vectorstores()
         except Exception as e:
             logging.warning(f"Non riesco a salvare l'indice dopo delete: {e}")
         return True
-
-    def _estrai_label_da_splits(self, splits) -> str:
+    
+    @staticmethod
+    def _estrai_label_da_splits(splits) -> str:
         """
         Prova a ricavare una label utente (nome file) dai metadati 'source' dei Document.
         Ritorna il basename del primo 'source' trovato, altrimenti stringa vuota.
@@ -399,9 +388,7 @@ class Rag():
         seen = set()
         for doc in top_docs:
             content = doc.page_content or ""
-            # Faccio l'hash del testo del chunk
-            hash = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
-            key = (doc.metadata.get("source"), doc.metadata.get("page"), hash)
+            key = (doc.metadata.get("source"), doc.metadata.get("page"), content)
             if key in seen:
                 continue
             seen.add(key)
@@ -446,16 +433,17 @@ class Rag():
             raise Exception(f"Errore in fase RAG: {e}")
 
     # funzione che carica i vectorstore da file
-    def carica_indice_collezioni(self):
+    @classmethod
+    def carica_indice_vectorstores(cls):
         """
         Carica l'indice dei vector store. Ritorna un dict:
             { vectorstore_id_str: { "collection_name": str, "label": str } }
         Se il file è della vecchia versione (mappa semplice id->collection), effettua backfill minimale.
         """
-        if os.path.exists(self._indice_vectorestore_path):
+        if os.path.exists(cls.DEFAULT_VECTORSTORE_INDEX_FILE_PATH):
             try:
                 data = {}
-                with open(self._indice_vectorestore_path, "r", encoding="utf-8") as f:
+                with open(cls.DEFAULT_VECTORSTORE_INDEX_FILE_PATH, "r", encoding="utf-8") as f:
                     raw = json.load(f)
                 for k, v in raw.items():
                     data[k] = {"collection_name": v.get("collection_name", ""), "label": v.get("label", "")}
@@ -465,19 +453,17 @@ class Rag():
         return {}
 
     # funzione che salva i vectorstore su file
-    def salva_indice_collezioni(self):
+    @classmethod
+    def salva_indice_vectorstores(cls):
         """
         Salva su disco l'indice dei vector store:
             { vectorstore_id_str: { "collection_name": str, "label": str } }
         """
         try:
-            with open(self._indice_vectorestore_path, "w", encoding="utf-8") as f:
-                json.dump(self._indice_collezioni, f, indent=2, ensure_ascii=False)
+            with open(cls.DEFAULT_VECTORSTORE_INDEX_FILE_PATH, "w", encoding="utf-8") as f:
+                json.dump(cls._indice_vectorstores, f, indent=2, ensure_ascii=False)
         except Exception as e:
             raise Exception(f"Errore salvataggio indice Chroma: {e}")
-    
-    def get_indice_collezioni(self):
-        return self._indice_collezioni
 
     @staticmethod
     def estrai_modello_da_id(id_str: str) -> str:
@@ -492,12 +478,12 @@ class Rag():
             return ""
 
     @staticmethod
-    def costruisci_righe(providers: dict) -> list[tuple[str, object, str, str, str, str]]:
+    def costruisci_righe(providers: dict) -> list[tuple[str, str, str, str, str]]:
         """
         Costruisce le righe per la modale globale dei vector store aggregando TUTTI i provider.
 
         Ritorna una lista di tuple:
-          (provider_name, rag, id_str, collection_name, label, model_name)
+          (provider_name, id_str, collection_name, label, model_name)
 
         Dove:
           - id_str: stringa JSON dell'identificatore (file_id, engine, model, chunker)
@@ -505,26 +491,13 @@ class Rag():
           - label: etichetta utente (basename file), con fallback a collection_name
           - model_name: estratto da id_str
         """
-        righe: list[tuple[str, object, str, str, str, str]] = []
-
+        righe: list[tuple[str, str, str, str, str]] = []
+        indice = Rag.get_indice()  # { id_str: {"collection_name": str, "label": str} }
         for provider_name, provider in (providers or {}).items():
-            # Evita import circolari: trattiamo provider come oggetto "duck-typed"
-            rag = getattr(provider, "get_rag", lambda: None)()
-            if rag is None:
-                continue
-
-            indice = rag.get_indice_collezioni() or {}  # { id_str: {"collection_name": str, "label": str} }
-
             for id_str, entry in indice.items():
-                if isinstance(entry, dict):
-                    collection_name = entry.get("collection_name", "") or ""
-                    label = entry.get("label", "") or collection_name
-                else:
-                    # compat con vecchie versioni dell'indice: entry è la collection_name
-                    collection_name = str(entry)
-                    label = collection_name
-
+                collection_name = entry.get("collection_name", "") or ""
+                label = entry.get("label", "") or collection_name
                 model_name = Rag.estrai_modello_da_id(id_str)
-                righe.append((provider_name, rag, id_str, collection_name, label, model_name))
+                righe.append((provider_name, id_str, collection_name, label, model_name))
 
         return righe

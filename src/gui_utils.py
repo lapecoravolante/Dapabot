@@ -8,11 +8,6 @@ from src.providers.base import Provider
 from src.providers.rag import Rag
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Configurazione globale
-# ──────────────────────────────────────────────────────────────────────────────
-configurazione = Configurazione()
-
-# ──────────────────────────────────────────────────────────────────────────────
 # Bootstrap iniziale
 # ──────────────────────────────────────────────────────────────────────────────
 def inizializza():
@@ -97,7 +92,7 @@ def salva_configurazione(providers: Dict[str, Provider]):
             pass # Non bloccare il salvataggio su errori runtime
     # salvo su file
     try:
-        configurazione.set(Configurazione.PROVIDERS_KEY, configurazioni)
+        Configurazione.set(Configurazione.PROVIDERS_KEY, configurazioni)
         st.toast("Configurazione salvata ✅", icon="💾")
     except Exception as e:
         st.toast(f"Errore nel salvataggio: {e}", icon="💩")
@@ -111,13 +106,13 @@ def salva_configurazione(providers: Dict[str, Provider]):
     dismissible=False,
     on_dismiss="ignore"
 )
-def mostra_dialog_vectorestores_globale(righe: List[Tuple[str, object, str, str, str, str]]):
+def mostra_dialog_vectorestores_globale(righe: List[Tuple[str, str, str, str, str]]):
     st.caption("Elenco dei vectorstore in cache disponibili per la cancellazione")
 
-    gruppi: Dict[Tuple[str, str], List[Tuple[str, object, str, str]]] = {}
-    for provider_name, rag, id_str, coll_name, label, model_name in (righe or []):
+    gruppi: Dict[Tuple[str, str], List[Tuple[str, str, str]]] = {}
+    for provider_name, id_str, coll_name, label, model_name in (righe or []):
         key = (label, model_name)
-        gruppi.setdefault(key, []).append((provider_name, rag, id_str, coll_name))
+        gruppi.setdefault(key, []).append((provider_name, id_str, coll_name))
 
     header_cols = st.columns([0.50, 0.30, 0.20])
     with header_cols[0]:
@@ -139,8 +134,9 @@ def mostra_dialog_vectorestores_globale(righe: List[Tuple[str, object, str, str,
             with row_cols[2]:
                 if st.button("❌", key=f"del_vs_group_{idx}", help="Elimina questo vector store da tutti i provider"):
                     errori: List[str] = []
-                    for provider_name, rag, id_str, _coll_name in entries:
-                        ok = rag.delete_vectorstore(id_str)
+                    for provider_name, id_str, _coll_name in entries:
+                        provider = st.session_state.providers.get(provider_name)
+                        ok = provider.get_rag().delete_vectorstore(id_str)
                         if not ok:
                             errori.append(provider_name)
                     if errori:
@@ -152,16 +148,19 @@ def mostra_dialog_vectorestores_globale(righe: List[Tuple[str, object, str, str,
     st.divider()
 
     if st.button("Elimina tutto", type="primary", key="del_all_vs_global"):
-        flat_entries: List[Tuple[str, object, str, str]] = [
-            (provider_name, rag, id_str, coll_name)
+        flat_entries: List[Tuple[str, str]] = [
+            (provider_name, id_str)
             for (_label, _model), entries in gruppi.items()
-            for (provider_name, rag, id_str, coll_name) in entries
+            for (provider_name, id_str, _coll_name) in entries
         ]
+
         errori: List[str] = []
-        for provider_name, rag, id_str, _coll_name in flat_entries:
-            ok = rag.delete_vectorstore(id_str)
+        for provider_name, id_str in flat_entries:
+            provider = st.session_state.providers.get(provider_name)
+            ok = provider.get_rag().delete_vectorstore(id_str)
             if not ok:
                 errori.append(provider_name)
+
         if errori:
             st.warning("Impossibile eliminare da: " + ", ".join(sorted(set(errori))))
         else:

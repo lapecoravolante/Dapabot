@@ -9,7 +9,7 @@ import base64, validators
 
 class Provider(ABC):
       
-    def __init__(self, nome, prefisso_token="", base_url=""):
+    def __init__(self, nome, base_url, prefisso_token=""):
         self._nome=nome
         self._prefisso_token=prefisso_token
         self.set_baseurl(base_url)
@@ -22,8 +22,8 @@ class Provider(ABC):
         self._motore_di_embedding=None
         self.set_disponibile(False) # mi dice se il provider è raggiungibile via rete o temporaneamente irragiungibile
         self._rag : Rag = Rag()
-        # carico l'eventuale configurazione da file su disco        
-        configurazione = Configurazione().get_all()[Configurazione.PROVIDERS_KEY]
+        # carico l'eventuale configurazione da file su disco 
+        configurazione = Configurazione.carica().get(Configurazione.PROVIDERS_KEY, {})
         for p in configurazione:
             if p["nome"]== nome:
                 self.set_baseurl(p["base_url"])
