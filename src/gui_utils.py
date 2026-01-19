@@ -1,11 +1,13 @@
 import streamlit as st
 import extra_streamlit_components as stx
+from streamlit_adjustable_columns import adjustable_columns
 from typing import Dict, List, Tuple
 from src.Messaggio import Messaggio
 from src.Configurazione import Configurazione
 from src.providers.loader import Loader
 from src.providers.base import Provider
 from src.providers.rag import Rag
+import time
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Bootstrap iniziale
@@ -101,79 +103,71 @@ def salva_configurazione(providers: Dict[str, Provider]):
 # Dialog globale vector stores
 # ──────────────────────────────────────────────────────────────────────────────
 @st.dialog(
-    "🖴 Cache dei vector stores",
+    "🗄️ Cache dei vector store",
     width="medium",
     dismissible=False,
-    on_dismiss="ignore"
 )
-def mostra_dialog_vectorestores_globale(righe: List[Tuple[str, str, str, str, str]]):
-    st.caption("Elenco dei vectorstore in cache disponibili per la cancellazione")
+def mostra_dialog_vectorestores_globale():
+    st.caption("Vector store presenti nella cache globale")
 
-    gruppi: Dict[Tuple[str, str], List[Tuple[str, str, str]]] = {}
-    for provider_name, id_str, coll_name, label, model_name in (righe or []):
-        key = (label, model_name)
-        gruppi.setdefault(key, []).append((provider_name, id_str, coll_name))
+    # Costruisce l’elenco dei vectorstore
+    righe = Rag.costruisci_righe()
 
-    header_cols = st.columns([0.50, 0.30, 0.20])
-    with header_cols[0]:
-        st.markdown("**File**")
-    with header_cols[1]:
-        st.markdown("**Modello**")
-    with header_cols[2]:
-        st.markdown("**Elimina**")
+    # =============================================
+    # Header ridimensionabile SEMPRE
+    # =============================================
+    larghezze = st.session_state.get("vs_column_widths", [3, 3, 1])
 
-    if not gruppi:
-        st.info("Nessun vector store disponibile.")
+    # Usa adjustable_columns sempre per mantenere le maniglie
+    result = adjustable_columns(
+        larghezze,
+        return_widths=True,
+        labels=["📄 File", "🧠 Modello", ""],
+        key="hdr_vs_cols"
+    )
+    header_cols = result["columns"]
+    st.session_state["vs_column_widths"] = result["widths"]
+
+    header_cols[0].markdown("**📄 File**")
+    header_cols[1].markdown("**🧠 Modello**")
+    header_cols[2].markdown("")  # spazio vuoto
+
+    # =============================================
+    # Mostra le righe (se presenti)
+    # =============================================
+    if righe:
+        for idx, (id_str, collection, label, model) in enumerate(righe):
+            cols = st.columns(st.session_state["vs_column_widths"])
+            cols[0].write(label)
+            cols[1].write(model)
+            if cols[2].button("❌", key=f"del_vs_{idx}", help="Elimina vector store"):
+                Rag.delete_vectorstore(id_str)
+                st.toast(f"Eliminato: {label}", icon="🗑️")
+                st.rerun()
     else:
-        for idx, ((label, model_name), entries) in enumerate(gruppi.items()):
-            row_cols = st.columns([0.50, 0.30, 0.20])
-            with row_cols[0]:
-                st.write(f"_{label}_")
-            with row_cols[1]:
-                st.code(model_name)
-            with row_cols[2]:
-                if st.button("❌", key=f"del_vs_group_{idx}", help="Elimina questo vector store da tutti i provider"):
-                    errori: List[str] = []
-                    for provider_name, id_str, _coll_name in entries:
-                        provider = st.session_state.providers.get(provider_name)
-                        ok = provider.get_rag().delete_vectorstore(id_str)
-                        if not ok:
-                            errori.append(provider_name)
-                    if errori:
-                        st.warning(f"Impossibile eliminare da: {', '.join(errori)}")
-                    else:
-                        st.success(f"Eliminato: {label} • {model_name} (tutti i provider)")
-                    st.rerun()
+        st.info("Nessun vector store presente.")   # mostra info ma senza return
 
     st.divider()
 
-    if st.button("Elimina tutto", type="primary", key="del_all_vs_global"):
-        flat_entries: List[Tuple[str, str]] = [
-            (provider_name, id_str)
-            for (_label, _model), entries in gruppi.items()
-            for (provider_name, id_str, _coll_name) in entries
-        ]
-
-        errori: List[str] = []
-        for provider_name, id_str in flat_entries:
-            provider = st.session_state.providers.get(provider_name)
-            ok = provider.get_rag().delete_vectorstore(id_str)
-            if not ok:
-                errori.append(provider_name)
-
-        if errori:
-            st.warning("Impossibile eliminare da: " + ", ".join(sorted(set(errori))))
-        else:
-            st.success("Tutti i vector store sono stati eliminati.")
+    # =============================================
+    # Pulsante "Elimina tutto"
+    # =============================================
+    if st.button("Elimina tutto", type="primary"):
+        for id_str, *_ in righe:
+            Rag.delete_vectorstore(id_str)
+        st.success("Tutti i vector store sono stati rimossi.")
         st.rerun()
 
-    if st.button("Chiudi", key="close_vs_dialog_global"):
+    # =============================================
+    # Pulsante "Chiudi"
+    # =============================================
+    if st.button("Chiudi"):
         st.session_state["vs_dialog_global_open"] = False
         st.rerun()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Sidebar
-# ───────z──────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 def crea_sidebar(providers: Dict[str, Provider]):
     st.logo(image="src/img/logo.png", size="large")
 
@@ -277,8 +271,7 @@ def crea_sidebar(providers: Dict[str, Provider]):
     
     # ---- Render della finestra modale ----
     if st.session_state.get("vs_dialog_global_open", False):
-        righe = Rag.costruisci_righe(providers)
-        mostra_dialog_vectorestores_globale(righe)
+        mostra_dialog_vectorestores_globale()
 
     return provider_scelto, messaggio_di_sistema
 

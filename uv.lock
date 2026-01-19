@@ -181,21 +181,6 @@ wheels = [
 ]
 
 [[package]]
-name = "assemblyai"
-version = "0.46.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "typing-extensions" },
-    { name = "websockets" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/90/c2/bf1abe9f64e5b039a7ebf5f0b09164e1fddc5870f43def250627f0fab361/assemblyai-0.46.0.tar.gz", hash = "sha256:3e675753b954737b280ed862022c6b4eceeee81ee3ee2158a7b0612d1db9559a", size = 55747, upload-time = "2025-11-05T19:33:19.266Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/ad/823274ed6282abb033ea8a58407e32a508dd48cd2a20c3f847955a668c64/assemblyai-0.46.0-py3-none-any.whl", hash = "sha256:77a4da84a3867febc30ffa1a3780c66cc2f27c9cc7f30887667e8ab6a337c237", size = 51841, upload-time = "2025-11-05T19:33:17.856Z" },
-]
-
-[[package]]
 name = "attrs"
 version = "25.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -482,9 +467,7 @@ name = "dapabot"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "assemblyai" },
     { name = "docling" },
-    { name = "docx2txt" },
     { name = "extra-streamlit-components" },
     { name = "huggingface-hub" },
     { name = "langchain" },
@@ -494,19 +477,15 @@ dependencies = [
     { name = "langchain-docling" },
     { name = "langchain-huggingface" },
     { name = "langchain-openai" },
-    { name = "openpyxl" },
-    { name = "python-magic" },
     { name = "sentence-transformers" },
     { name = "streamlit" },
-    { name = "streamlit-cookies-controller" },
+    { name = "streamlit-adjustable-columns" },
     { name = "validators" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "assemblyai", specifier = ">=0.46.0" },
     { name = "docling", specifier = ">=2.63.0" },
-    { name = "docx2txt", specifier = ">=0.9" },
     { name = "extra-streamlit-components", specifier = ">=0.1.81" },
     { name = "huggingface-hub", specifier = ">=0.36.0" },
     { name = "langchain", specifier = ">=1.0.7" },
@@ -516,11 +495,9 @@ requires-dist = [
     { name = "langchain-docling", specifier = ">=2.0.0" },
     { name = "langchain-huggingface", specifier = ">=1.0.1" },
     { name = "langchain-openai", specifier = ">=1.0.3" },
-    { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "python-magic", specifier = ">=0.4.27" },
     { name = "sentence-transformers", specifier = ">=5.1.2" },
     { name = "streamlit", specifier = ">=1.51.0" },
-    { name = "streamlit-cookies-controller", specifier = ">=0.0.4" },
+    { name = "streamlit-adjustable-columns", specifier = ">=0.2.1" },
     { name = "validators", specifier = ">=0.35.0" },
 ]
 
@@ -679,15 +656,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/dc/55b330b408820a33af3db0dfac973db32c74361fa44b628f2555eb1caab4/docling_parse-4.7.1-cp314-cp314-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:95c2eb61afbcc238b3a37dfccfc5c7d6e069c8fa6b8c87f37b4240594446f4a6", size = 14980770, upload-time = "2025-11-05T18:25:17.616Z" },
     { url = "https://files.pythonhosted.org/packages/f0/da/a7b03b4e3c369697a4ed85c99317675895acb74c4c6e1106edd34e12382b/docling_parse-4.7.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:50a6cf0d9c6dea0d136703b32708a50edc0c576a9fc96aa39c43605c84acb40b", size = 15091853, upload-time = "2025-11-05T18:25:19.939Z" },
     { url = "https://files.pythonhosted.org/packages/43/3f/8f1165dc52b10b378bd3c63c6362b0e9b0fe8886366250e0fd5044b31e59/docling_parse-4.7.1-cp314-cp314-win_amd64.whl", hash = "sha256:52f67604daf69b785761b7aa96e6035f705b7f51135cf76d825b8de59c0dfa54", size = 16786477, upload-time = "2025-11-05T18:25:22.305Z" },
-]
-
-[[package]]
-name = "docx2txt"
-version = "0.9"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ea/07/4486a038624e885e227fe79111914c01f55aa70a51920ff1a7f2bd216d10/docx2txt-0.9.tar.gz", hash = "sha256:18013f6229b14909028b19aa7bf4f8f3d6e4632d7b089ab29f7f0a4d1f660e28", size = 3613, upload-time = "2025-03-24T20:59:25.21Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/51/756e71bec48ece0ecc2a10e921ef2756e197dcb7e478f2b43673b6683902/docx2txt-0.9-py3-none-any.whl", hash = "sha256:e3718c0653fd6f2fcf4b51b02a61452ad1c38a4c163bcf0a6fd9486cd38f529a", size = 4025, upload-time = "2025-03-24T20:59:24.394Z" },
 ]
 
 [[package]]
@@ -3235,15 +3203,6 @@ wheels = [
 ]
 
 [[package]]
-name = "python-magic"
-version = "0.4.27"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/da/db/0b3e28ac047452d079d375ec6798bf76a036a08182dbb39ed38116a49130/python-magic-0.4.27.tar.gz", hash = "sha256:c1ba14b08e4a5f5c31a302b7721239695b2f0f058d125bd5ce1ee36b9d9d3c3b", size = 14677, upload-time = "2022-06-07T20:16:59.508Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/6c/73/9f872cb81fc5c3bb48f7227872c28975f998f3e7c2b1c16e95e6432bbb90/python_magic-0.4.27-py2.py3-none-any.whl", hash = "sha256:c212960ad306f700aa0d01e5d7a325d20548ff97eb9920dcd29513174f0294d3", size = 13840, upload-time = "2022-06-07T20:16:57.763Z" },
-]
-
-[[package]]
 name = "python-pptx"
 version = "1.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -3924,15 +3883,15 @@ wheels = [
 ]
 
 [[package]]
-name = "streamlit-cookies-controller"
-version = "0.0.4"
+name = "streamlit-adjustable-columns"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "streamlit" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b0/c8/7caf505d62faeb8c0f6e6b74b554e1c2b0c3ca46c0a39250445c574a5a18/streamlit-cookies-controller-0.0.4.tar.gz", hash = "sha256:f5df2543de858f1585dcb6e90f58f38aafbf313ee8e237c64663b2d9761583cc", size = 406305, upload-time = "2024-04-10T03:50:35.813Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/aa/9dd7cb7e8ebd61b45e4a51cbaee4387922793ef94ff43a20493fb3ae5590/streamlit-adjustable-columns-0.2.1.tar.gz", hash = "sha256:b01f79c0f455d75a56d5cd03a7d769faf1ed31fcc98a1661df7583d021afb438", size = 154435, upload-time = "2025-06-23T12:52:44.247Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/c6/3bbdfecf5009943bcb62d37e3fd4b3fe45e87137e449a50e3025170bc9f7/streamlit_cookies_controller-0.0.4-py3-none-any.whl", hash = "sha256:f97fec6acdeee9cb9e16da25c3fc91d404b5b0ddced87c1d9fa9c62f65ca3251", size = 409303, upload-time = "2024-04-10T03:50:33.458Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/46/75d9b33a65e6fffb1e780376ecc68c5c737bae16172d16c07950e68cc19c/streamlit_adjustable_columns-0.2.1-py3-none-any.whl", hash = "sha256:2986d4cdef4422ac5da0a7fd1d52faefbf6ccf04bebdd44cf31686ee3c296eb2", size = 157020, upload-time = "2025-06-23T12:52:42.643Z" },
 ]
 
 [[package]]

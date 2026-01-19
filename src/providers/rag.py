@@ -299,13 +299,14 @@ class Rag():
 
         return vectorstore
 
-    def delete_vectorstore(self, vectorstore_id_str: str) -> bool:
+    @classmethod
+    def delete_vectorstore(cls, vectorstore_id_str: str) -> bool:
         """
         Cancella la collection dal DB Chroma e aggiorna indice/cache.
         Non rimuove i file su disco: la pulizia avverrà all'avvio tramite
         il metodo pulizia_orfani().
         """
-        entry = Rag.get_indice().get(vectorstore_id_str)
+        entry = cls.get_indice().get(vectorstore_id_str)
         if not entry:
             logging.warning(f"[RAG] delete_vectorstore: id non trovato nell'indice: {vectorstore_id_str}")
             return False
@@ -314,10 +315,9 @@ class Rag():
             return False
         try:
             # Apri la collection usando la sua cartella dedicata (persistenza per-collection)
-            collection_dir = os.path.join(Rag.DEFAULT_VECTORSTORE_PATH, collection_name)
+            collection_dir = os.path.join(cls.DEFAULT_VECTORSTORE_PATH, collection_name)
             vectorstore = Chroma(
                 collection_name=collection_name,
-                embedding_function=self._motore_di_embedding,
                 persist_directory=collection_dir,
             )
 
@@ -332,10 +332,10 @@ class Rag():
             logging.warning(f"Errore cancellazione collection '{collection_name}': {e}")
 
         # Aggiorna cache e indice
-        Rag._cache_vectorstores.pop(vectorstore_id_str, None)
-        Rag.get_indice().pop(vectorstore_id_str, None)
+        cls._cache_vectorstores.pop(vectorstore_id_str, None)
+        cls.get_indice().pop(vectorstore_id_str, None)
         try:
-            Rag.salva_indice_vectorstores()
+            cls.salva_indice_vectorstores()
         except Exception as e:
             logging.warning(f"Non riesco a salvare l'indice dopo delete: {e}")
         return True
@@ -477,27 +477,21 @@ class Rag():
         except Exception:
             return ""
 
+        return righe
+
     @staticmethod
-    def costruisci_righe(providers: dict) -> list[tuple[str, str, str, str, str]]:
+    def costruisci_righe() -> list[tuple[str, str, str, str]]:
         """
-        Costruisce le righe per la modale globale dei vector store aggregando TUTTI i provider.
-
         Ritorna una lista di tuple:
-          (provider_name, id_str, collection_name, label, model_name)
-
-        Dove:
-          - id_str: stringa JSON dell'identificatore (file_id, engine, model, chunker)
-          - collection_name: nome della collection in Chroma
-          - label: etichetta utente (basename file), con fallback a collection_name
-          - model_name: estratto da id_str
+        (id_str, collection_name, label, model_name)
         """
-        righe: list[tuple[str, str, str, str, str]] = []
+        righe = []
         indice = Rag.get_indice()  # { id_str: {"collection_name": str, "label": str} }
-        for provider_name, provider in (providers or {}).items():
-            for id_str, entry in indice.items():
-                collection_name = entry.get("collection_name", "") or ""
-                label = entry.get("label", "") or collection_name
-                model_name = Rag.estrai_modello_da_id(id_str)
-                righe.append((provider_name, id_str, collection_name, label, model_name))
+
+        for id_str, entry in indice.items():
+            collection_name = entry.get("collection_name", "")
+            label = entry.get("label", "") or collection_name
+            model_name = Rag.estrai_modello_da_id(id_str)
+            righe.append((id_str, collection_name, label, model_name))
 
         return righe
