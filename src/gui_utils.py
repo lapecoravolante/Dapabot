@@ -1,6 +1,5 @@
 import streamlit as st
 import extra_streamlit_components as stx
-from streamlit_adjustable_columns import adjustable_columns
 from typing import Dict, List, Tuple
 from src.Messaggio import Messaggio
 from src.Configurazione import Configurazione
@@ -110,42 +109,38 @@ def salva_configurazione(providers: Dict[str, Provider]):
 def mostra_dialog_vectorestores_globale():
     st.caption("Vector store presenti nella cache globale")
 
-    # Costruisce l’elenco dei vectorstore
+    # Elenco vectorstore
     righe = Rag.costruisci_righe()
 
     # =============================================
-    # Header ridimensionabile SEMPRE
+    # Header delle colonne con st.columns
     # =============================================
-    larghezze = st.session_state.get("vs_column_widths", [3, 3, 1])
-
-    # Usa adjustable_columns sempre per mantenere le maniglie
-    result = adjustable_columns(
-        larghezze,
-        return_widths=True,
-        labels=["📄 File", "🧠 Modello", ""],
-        key="hdr_vs_cols"
-    )
-    header_cols = result["columns"]
-    st.session_state["vs_column_widths"] = result["widths"]
-
-    header_cols[0].markdown("**📄 File**")
-    header_cols[1].markdown("**🧠 Modello**")
-    header_cols[2].markdown("")  # spazio vuoto
+    # Imposta larghezze relative qua (es. 4, 4, 1)
+    header_col1, header_col2, header_col3 = st.columns([4, 4, 1])
+    with header_col1:
+        st.markdown("**📄 File**")
+    with header_col2:
+        st.markdown("**🧠 Modello**")
+    with header_col3:
+        st.markdown("")  # spazio per i pulsanti
 
     # =============================================
     # Mostra le righe (se presenti)
     # =============================================
     if righe:
         for idx, (id_str, collection, label, model) in enumerate(righe):
-            cols = st.columns(st.session_state["vs_column_widths"])
-            cols[0].write(label)
-            cols[1].write(model)
-            if cols[2].button("❌", key=f"del_vs_{idx}", help="Elimina vector store"):
-                Rag.delete_vectorstore(id_str)
-                st.toast(f"Eliminato: {label}", icon="🗑️")
-                st.rerun()
+            col1, col2, col3 = st.columns([4, 4, 1])
+            with col1:
+                st.write(label)
+            with col2:
+                st.write(model)
+            with col3:
+                if st.button("❌", key=f"del_vs_{idx}", help="Elimina vector store"):
+                    Rag.delete_vectorstore(id_str)
+                    st.toast(f"Eliminato: {label}", icon="🗑️")
+                    st.rerun()
     else:
-        st.info("Nessun vector store presente.")   # mostra info ma senza return
+        st.info("Nessun vector store presente.")
 
     st.divider()
 
