@@ -5,7 +5,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from src.Messaggio import Messaggio
 from src.Allegato import Allegato
-import os, logging, hashlib, json, shutil
+import os, logging, hashlib, json, shutil, gc, time
 from typing import Dict, Tuple
 
 class Rag():
@@ -211,9 +211,23 @@ class Rag():
     
     def _genera_nome_collezione(self, vectorstore_id: Tuple) -> str:
         """
-        Genera un nome di collection deterministico e stabile a partire dal vectorstore_id.
+        Genera un nome di collection a partire dal vectorstore_id.
+        Il parametro "salt" serve per non generare mai lo stesso nome per lo stesso file.
+        Il motivo è complesso ed è legato al funzionamento interno di ChromaDB il quale:
+        -   mantiene un singleton client;
+        -   mantiene connessioni aperte;
+        -   mantiene file descriptor su SQLite;
+        -   non rilascia mai completamente il lock.
+        Perciò quando una collection viene cancellata e poi ricreata per fare ulteriori ricerche RAG succede che:
+        -   SQLite trova WAL (Write-Ahead Log) incoerenti;
+        -   entra in safe mode;
+        -   diventa readonly
+        e la creazione del vectorstore per il file va in errore con un messaggio del tipo:
+        "Database error: error returned from database: (code: 1032) attempt to write a readonly database"
+        Questo succede anche se la directory è stata eliminata correttamente in precedenza.
         """
-        return "rag_" + hashlib.sha256(str(vectorstore_id).encode("utf-8")).hexdigest()
+        salt = time.time_ns()
+        return "rag_" + hashlib.sha256(f"{vectorstore_id}-{salt}".encode()).hexdigest()
 
     def _get_vectorstore(self, vectorstore_id: Tuple, path: str, tipo: str) -> Chroma:
         """
@@ -313,9 +327,15 @@ class Rag():
         collection_name = entry.get("collection_name")
         if not collection_name:
             return False
+        collection_dir = os.path.join(cls.DEFAULT_VECTORSTORE_PATH, collection_name)
         try:
-            # Apri la collection usando la sua cartella dedicata (persistenza per-collection)
-            collection_dir = os.path.join(cls.DEFAULT_VECTORSTORE_PATH, collection_name)
+            # 1) Rimuove il vectorstore dalla cache in RAM
+            vectorstore = cls._cache_vectorstores.pop(vectorstore_id_str, None)
+            if vectorstore is not None:
+                del vectorstore
+            gc.collect()
+
+            # 2) Apre un client "pulito" solo per il delete logico
             vectorstore = Chroma(
                 collection_name=collection_name,
                 persist_directory=collection_dir,
@@ -325,15 +345,18 @@ class Rag():
             if client is None:
                 raise RuntimeError("Client interno Chroma non disponibile.")
 
-            # Delete logica sul DB
+            # Cancellazione logica sul DB
             client.delete_collection(name=collection_name)
-
+            # 3) Distruggi TUTTO
+            del client
+            del vectorstore
+            gc.collect()
+            # 4) Cancello anche dal disco
+            shutil.rmtree(collection_dir, ignore_errors=False)
+            # 5) Aggiorna indice
+            cls.get_indice().pop(vectorstore_id_str, None)            
         except Exception as e:
             logging.warning(f"Errore cancellazione collection '{collection_name}': {e}")
-
-        # Aggiorna cache e indice
-        cls._cache_vectorstores.pop(vectorstore_id_str, None)
-        cls.get_indice().pop(vectorstore_id_str, None)
         try:
             cls.salva_indice_vectorstores()
         except Exception as e:
