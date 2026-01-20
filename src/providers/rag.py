@@ -111,7 +111,7 @@ class Rag():
     def init_vectorstore_cache(cls):
         # Pulizia one-shot delle directory orfane
         cls._pulizia_orfani()
-        # se non esiste creo la directory per io vectorstores
+        # se non esiste creo la directory per i vectorstores
         os.makedirs(cls.DEFAULT_VECTORSTORE_PATH, exist_ok=True)
         # inizializzo la cache in RAM
         cls.get_indice()
@@ -209,7 +209,8 @@ class Rag():
                 raise Exception(f"Errore nel parsing del testo semplice: {e}")
         return clean_splits
     
-    def _genera_nome_collezione(self, vectorstore_id: Tuple) -> str:
+    @staticmethod
+    def _genera_nome_collezione(vectorstore_id: Tuple) -> str:
         """
         Genera un nome di collection a partire dal vectorstore_id.
         Il parametro "salt" serve per non generare mai lo stesso nome per lo stesso file.
@@ -313,13 +314,9 @@ class Rag():
 
         return vectorstore
 
+    #Cancella la collection dal DB Chroma e aggiorna indice/cache.
     @classmethod
     def delete_vectorstore(cls, vectorstore_id_str: str) -> bool:
-        """
-        Cancella la collection dal DB Chroma e aggiorna indice/cache.
-        Non rimuove i file su disco: la pulizia avverrà all'avvio tramite
-        il metodo pulizia_orfani().
-        """
         entry = cls.get_indice().get(vectorstore_id_str)
         if not entry:
             logging.warning(f"[RAG] delete_vectorstore: id non trovato nell'indice: {vectorstore_id_str}")
@@ -333,7 +330,7 @@ class Rag():
             vectorstore = cls._cache_vectorstores.pop(vectorstore_id_str, None)
             if vectorstore is not None:
                 del vectorstore
-            gc.collect()
+                gc.collect()
 
             # 2) Apre un client "pulito" solo per il delete logico
             vectorstore = Chroma(
@@ -461,7 +458,6 @@ class Rag():
         """
         Carica l'indice dei vector store. Ritorna un dict:
             { vectorstore_id_str: { "collection_name": str, "label": str } }
-        Se il file è della vecchia versione (mappa semplice id->collection), effettua backfill minimale.
         """
         if os.path.exists(cls.DEFAULT_VECTORSTORE_INDEX_FILE_PATH):
             try:
