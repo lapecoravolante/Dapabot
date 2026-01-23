@@ -9,7 +9,9 @@ RUN  mkdir -p ${APP_HOME}
 WORKDIR ${APP_HOME}
 COPY . ${APP_HOME}
 
-RUN uv sync 
+# L'applicazione scaricherà al primo avvio tutte le dipendenze neessarie.
+# Decommentare l'istruzione seguente per creare un'immagine di circa 9GB con tutte le dipendenze già scaricate.
+#RUN uv sync 
 
 EXPOSE 8501
 

@@ -9,7 +9,7 @@ import os, logging, hashlib, json, shutil, gc, time
 from typing import Dict, Tuple
 
 class Rag():
-    
+
     DEFAULT_EMBEDDING_MODEL="sentence-transformers/all-MiniLM-L6-v2"
     DEFAULT_UPLOAD_DIR="uploads/"
     DEFAULT_TOPK=3
@@ -18,25 +18,28 @@ class Rag():
     DEFAULT_VECTORSTORE_INDEX_FILE="index.json"
     DEFAULT_VECTORSTORE_INDEX_FILE_PATH = os.path.join(DEFAULT_VECTORSTORE_PATH, DEFAULT_VECTORSTORE_INDEX_FILE)
     AVAILABLE_SEARCH_MODALITIES=["similarity", "mmr"]
-    
+    DEFAULT_RAPIDOCR_HOME="rapidocr/" # usata solo per far funzionare le cose nello Streamlit Cloud (cfr. https://github.com/docling-project/docling-serve/issues/375)
     # cache dei vectorstore per file già elaborati
     _cache_vectorstores: Dict[Tuple, Chroma] = {}
     # indice su disco della cache dei vectorstore
     _indice_vectorstores: Dict[Tuple, Dict[str, str]] = {}
-    
+
     _pulizia_fatta = False  # esegue la pulizia solo una volta per processo
-    
-    def __init__(self, attivo=False, modello=None, upload_dir=None, topk=None, 
+
+    def __init__(self, attivo=False, modello=None, upload_dir=None, topk=None,
                  motore_di_embedding=None, tokenizer="", modalita_ricerca="similarity"):
         # Silenzia i log di sentence-transformers
         logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
         logging.getLogger("sentence_transformers.SentenceTransformer").setLevel(logging.ERROR)
+        # inmposta la variabile d'ambiente per RapidOCR
+        os.environ["RAPIDOCR_HOME"]=Rag.DEFAULT_RAPIDOCR_HOME
+        os.makedirs(Rag.DEFAULT_RAPIDOCR_HOME, exist_ok=True)
         self.set_upload_dir(upload_dir) # la directory con gli allegati
         self.set_modello(modello) # il modello di embedding scelto
         self.set_topk(topk) # imposto quanti risultati tornare all'utente (k)
-        self.set_prompt(None) # inizializzo un prompt vuoto  
-        self.set_motore_di_embedding(motore_di_embedding) 
-        self.set_attivo(attivo) 
+        self.set_prompt(None) # inizializzo un prompt vuoto
+        self.set_motore_di_embedding(motore_di_embedding)
+        self.set_attivo(attivo)
         self.set_tokenizer(tokenizer)
         self.init_vectorstore_cache() # inizializza la cache e la directory per la persistenza dei vectorstores
         self.set_modalita_ricerca(modalita_ricerca)
@@ -49,20 +52,20 @@ class Rag():
             "directory_vectorstores": Rag.DEFAULT_VECTORSTORE_PATH,
             "modalita_ricerca": self._modalita_ricerca
         }
-        
+
     # Per ora il rag supporta solo 2 modalità di ricerca: mmr e similarity
     def set_modalita_ricerca(self, modalita_ricerca):
         if modalita_ricerca not in Rag.AVAILABLE_SEARCH_MODALITIES:
             raise ValueError(f"Modalità di ricerca non valida: {modalita_ricerca}")
         self._modalita_ricerca = modalita_ricerca
-        
+
     def get_modalita_ricerca(self):
         return self._modalita_ricerca
 
     @classmethod
     def _pulizia_orfani(cls) -> None:
         """
-        Rimuove le directory orfane dentro Rag.DEFAULT_VECTORSTORE_PATH, cioè quelle 
+        Rimuove le directory orfane dentro Rag.DEFAULT_VECTORSTORE_PATH, cioè quelle
         che non corrispondono a nessuna 'collection_name' nell'indice JSON.
         Esegue la pulizia una sola volta per processo.
         """
@@ -116,7 +119,7 @@ class Rag():
         # inizializzo la cache in RAM
         cls.get_indice()
 
-    # imposta i parametri per il chunker: 
+    # imposta i parametri per il chunker:
     # tokenizer: il tokenizzatore da usare
     # max_tokens: lunghezza massima del chunk
     # overlap: quanti caratteri saranno sovrapposti tra 2 tokens consecutivi
@@ -124,18 +127,18 @@ class Rag():
         self._chunker=HybridChunker()
         if tokenizer!="" and tokenizer:
             if max_tokens > 0 and overlap > 0:
-                self._chunker = HybridChunker(tokenizer=tokenizer, 
+                self._chunker = HybridChunker(tokenizer=tokenizer,
                                             max_tokens=max_tokens,
                                             overlap=overlap)
             else:
                 self._chunker = HybridChunker(tokenizer=tokenizer)
-    
+
     def set_attivo(self, attivo=False):
         self._attivo=attivo
-    
+
     def get_attivo(self):
         return self._attivo
-    
+
     # Imposta il motore per generare gli embedding
     def set_motore_di_embedding(self, motore_di_embedding):
         if motore_di_embedding:
@@ -146,30 +149,30 @@ class Rag():
     def set_modello(self, modello):
         self._modello=Rag.DEFAULT_EMBEDDING_MODEL
         if modello:
-           self._modello=modello 
-    
+           self._modello=modello
+
     def get_modello(self):
         return self._modello
-            
+
     def set_upload_dir(self, upload_dir):
         self._upload_dir=Rag.DEFAULT_UPLOAD_DIR
         if upload_dir:
             self._upload_dir=upload_dir
-    
+
     def get_upload_dir(self):
         return self._upload_dir
-            
+
     def set_topk(self, topk):
         self._topk=Rag.DEFAULT_TOPK
         if topk:
             self._topk=topk
-    
+
     def get_topk(self):
         return self._topk
-    
+
     def set_prompt(self, prompt: Messaggio):
         self._prompt=prompt
-    
+
     def _filtra_metadati_complessi(self, save_path, mimetype):
         clean_splits = []
         # Docling non supporta i file in testo semplice, quindi devo gestirli separatamente
@@ -208,7 +211,7 @@ class Rag():
             except Exception as e:
                 raise Exception(f"Errore nel parsing del testo semplice: {e}")
         return clean_splits
-    
+
     @staticmethod
     def _genera_nome_collezione(vectorstore_id: Tuple) -> str:
         """
@@ -351,7 +354,7 @@ class Rag():
             # 4) Cancello anche dal disco
             shutil.rmtree(collection_dir, ignore_errors=False)
             # 5) Aggiorna indice
-            cls.get_indice().pop(vectorstore_id_str, None)            
+            cls.get_indice().pop(vectorstore_id_str, None)
         except Exception as e:
             logging.warning(f"Errore cancellazione collection '{collection_name}': {e}")
         try:
@@ -359,7 +362,7 @@ class Rag():
         except Exception as e:
             logging.warning(f"Non riesco a salvare l'indice dopo delete: {e}")
         return True
-    
+
     @staticmethod
     def _estrai_label_da_splits(splits) -> str:
         """
@@ -376,19 +379,19 @@ class Rag():
         return ""
 
     # Inizialmente facevo una semplice similarity_search ma mi sono reso conto che con
-    # query brevi o con chunk piccoli uscivano molti duplicati. Quindi ho deciso di 
+    # query brevi o con chunk piccoli uscivano molti duplicati. Quindi ho deciso di
     # implementare anche una MMR (Maximal Marginal Relevance) seguita da una deduplica
     # dei doppioni per pagina.
     def _recupero_chunk(self, vectorstore, modo):
         """
         L'argomento "modo" specifica il tipo di ricerca da effettuare:
-            - "mmr": effettua una ricerca Maximal Marginal Relevance. In sostanza vengono presi 
+            - "mmr": effettua una ricerca Maximal Marginal Relevance. In sostanza vengono presi
                     un numero di chunk (fetch_k) che è più alto rispetto a quello impostato
                     (top_k) in modo da massimizzare la diversità dei chunk
-            - "similarity": effettua una semplice ricerca in basse alla somiglianza tra la 
+            - "similarity": effettua una semplice ricerca in basse alla somiglianza tra la
                             query e il contenuto del testo nel chucnk.
         Qualunque sia la modalità scelta, poi si filtrano i doppioni in base al numero di pagina e al
-        contenuto del chunk (si fa l'hash del testo del chuck) 
+        contenuto del chunk (si fa l'hash del testo del chuck)
         """
         top_docs=None
         if modo=="similarity":
@@ -403,7 +406,7 @@ class Rag():
                 fetch_k=fetch_k,
                 lambda_mult=0.3,
             )
-        # Elimino i chuck duplicati 
+        # Elimino i chuck duplicati
         chunk_unici = []
         seen = set()
         for doc in top_docs:
@@ -414,7 +417,7 @@ class Rag():
             seen.add(key)
             chunk_unici.append(doc)
         return chunk_unici
-    
+
     def run(self):
         """Esegue il RAG e restituisce i top-k risultati per ciascun allegato"""
         if not self._prompt:
@@ -422,7 +425,7 @@ class Rag():
         risultato = []
         try:
             os.makedirs(self._upload_dir, exist_ok=True)
-            # imposto le varie parti che compongono il nome della chiave nella cache dei vectorstores            
+            # imposto le varie parti che compongono il nome della chiave nella cache dei vectorstores
             engine_name = type(self._motore_di_embedding).__name__
             model_name = self._modello
             chunker_sig = f"{type(self._chunker).__name__}:{getattr(self._chunker,'max_tokens',None)}:{getattr(self._chunker,'overlap',None)}"
@@ -431,7 +434,7 @@ class Rag():
                 save_path = os.path.join(self._upload_dir, f.name)
                 with open(save_path, "wb") as out:
                     out.write(f.getbuffer())
-                    file_id=hashlib.sha256(f.getbuffer()).hexdigest()  
+                    file_id=hashlib.sha256(f.getbuffer()).hexdigest()
                 # Questa tupla identifica univocamente un vectorstore nella cache
                 chiave_cache = (file_id, engine_name, model_name, chunker_sig)
                 # Recupera il vectorstore (dalla cache se già esiste)
