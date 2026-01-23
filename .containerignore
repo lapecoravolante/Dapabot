@@ -1,0 +1,10 @@
+.venv
+.git
+.gitignore
+.python-version
+config.json
+**/__pycache__/
+Containerfile
+vectorstore_cache
+uploads/
+packages.txt
