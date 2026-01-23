@@ -17,8 +17,7 @@ class Rag():
     DEFAULT_VECTORSTORE_PATH = "vectorstore_cache/"  # dove vengono persistiti i vector store
     DEFAULT_VECTORSTORE_INDEX_FILE="index.json"
     DEFAULT_VECTORSTORE_INDEX_FILE_PATH = os.path.join(DEFAULT_VECTORSTORE_PATH, DEFAULT_VECTORSTORE_INDEX_FILE)
-    AVAILABLE_SEARCH_MODALITIES=["similarity", "mmr"]
-    DEFAULT_RAPIDOCR_HOME="rapidocr/" # usata solo per far funzionare le cose nello Streamlit Cloud (cfr. https://github.com/docling-project/docling-serve/issues/375)
+    AVAILABLE_SEARCH_MODALITIES=["similarity", "mmr"]    
     # cache dei vectorstore per file già elaborati
     _cache_vectorstores: Dict[Tuple, Chroma] = {}
     # indice su disco della cache dei vectorstore
@@ -31,9 +30,6 @@ class Rag():
         # Silenzia i log di sentence-transformers
         logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
         logging.getLogger("sentence_transformers.SentenceTransformer").setLevel(logging.ERROR)
-        # inmposta la variabile d'ambiente per RapidOCR
-        os.environ["RAPIDOCR_HOME"]=Rag.DEFAULT_RAPIDOCR_HOME
-        os.makedirs(Rag.DEFAULT_RAPIDOCR_HOME, exist_ok=True)
         self.set_upload_dir(upload_dir) # la directory con gli allegati
         self.set_modello(modello) # il modello di embedding scelto
         self.set_topk(topk) # imposto quanti risultati tornare all'utente (k)
