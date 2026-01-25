@@ -6,7 +6,7 @@ from src.Configurazione import Configurazione
 from src.providers.loader import Loader
 from src.providers.base import Provider
 from src.providers.rag import Rag
-import time
+from src.StoricoChat import StoricoChat
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Bootstrap iniziale
@@ -260,6 +260,58 @@ def crea_sidebar(providers: Dict[str, Provider]):
             # ---- Pulsante globale per aprire la finestra MODALE con TUTTI i vector store ----
             if st.button("Cache...", key="btn_vs_global", help="Gestisci tutti i vector store di tutti i provider", icon="🗄️"):
                 st.session_state["vs_dialog_global_open"] = True
+        # ──────────────────────────────────────────────────────────────────────────────
+        # Sezione Storico Chat
+        # ──────────────────────────────────────────────────────────────────────────────
+        with st.expander("💬 Gestione Storico Chat", expanded=False):
+            with st.popover("💾 Salva chat..."):    
+                # Pulsante: Salva Chat corrente
+                if st.button("💾 Salva chat corrente"):
+                    cronologia = provider.get_cronologia_messaggi()
+                    StoricoChat.salva_chat(provider_scelto, st.session_state[modello_key], cronologia)
+                    st.toast("Chat salvata nel DB", icon="💾")
+
+                # Pulsante: Salva tutte le chat
+                if st.button("🗃️ Salva tutte le chat"):
+                    for nome_p, prov in providers.items():
+                        mod_corr = prov.get_modello_scelto()
+                        if mod_corr:
+                            StoricoChat.salva_chat(nome_p, mod_corr, prov.get_cronologia_messaggi())
+                    st.toast("Tutte le chat salvate", icon="💾")
+            with st.popover("🔁 Importa/esporta..."):    
+            # Esporta DB JSON
+                if st.button("📤 Esporta DB in JSON"):
+                    json_data = StoricoChat.esporta_json()
+                    st.download_button(
+                        "⬇️ Scarica JSON",
+                        data=json_data,
+                        file_name="storico_chat.json",
+                        mime="application/json"
+                        )
+
+                # Importa DB JSON
+                json_file = st.file_uploader("📥 Seleziona JSON da importare", type=["json"])
+                if json_file and st.button("📥 Importa cronologie"):
+                    text = json_file.read().decode("utf-8")
+                    StoricoChat.importa_json(text)
+                    st.toast("Importazione completata!", icon="✔️")
+            
+            with st.popover("🚮 Elimina cronologia..."):    
+                # Cancella cronologia corrente
+                if st.button("🗑️ Cancella cronologia corrente"):
+                    StoricoChat.cancella_cronologia(provider_scelto, st.session_state[modello_key])
+                    st.toast("Cronologia cancellata", icon="🗑️")
+                    
+                # Cancella tutto il DB
+                if st.button("🧹 Cancella tutto il DB"):
+                    StoricoChat.cancella_tutto()
+                    st.toast("DB cancellato", icon="🧹")
+
+            # Gestisci cronologie (placeholder)
+            if st.button("🔍 Gestisci cronologie"):
+                st.toast("Funzione da implementare", icon="ℹ️")
+
+
         # Salva configurazione (tutti i provider)
         st.button("Salva configurazione", key="salva", on_click=salva_configurazione, args=[providers])
     #st.sidebar.json(st.session_state)

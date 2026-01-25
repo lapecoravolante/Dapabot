@@ -8,6 +8,7 @@ wheels/
 config.json
 uploads/
 vectorstore_cache/
+storico_chat.db
 
 # Virtual environments
 .venv
