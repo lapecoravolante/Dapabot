@@ -13,6 +13,7 @@ from src.StoricoChat import StoricoChat
 # Bootstrap iniziale
 # ──────────────────────────────────────────────────────────────────────────────
 def inizializza():
+    StoricoChat.start_sqlite_web_server()
     if "providers" not in st.session_state:  # carica i providers una sola volta
         st.session_state.providers = Loader.discover_providers()
     providers = st.session_state.providers  # shortcut
@@ -308,8 +309,23 @@ def crea_sidebar(providers: Dict[str, Provider]):
                     st.toast("DB cancellato", icon="🧹")
 
             # Gestisci cronologie (placeholder)
-            if st.button("🔍 Gestisci cronologie"):
-                st.toast("Funzione da implementare", icon="ℹ️")
+            if StoricoChat.is_sqlite_web_active():
+                url = StoricoChat.get_sqlite_web_url()
+                st.markdown(
+                    f'<a href="{url}" target="_blank">'
+                    '<button style="width:100%; padding:8px; font-size:1rem;">'
+                    '🔍 Apri gestione DB'
+                    '</button></a>',
+                    unsafe_allow_html=True
+                )
+            else:
+                if st.button("🔍 Avvia e apri gestione cronologie"):
+                    started = StoricoChat.start_sqlite_web_server()
+                    if started:
+                        st.toast("Server DB avviato", icon="🌐")
+                    else:
+                        st.error("Avvio sqlite‑web fallito")
+
 
 
         # Salva configurazione (tutti i provider)

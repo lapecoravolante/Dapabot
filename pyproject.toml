@@ -17,6 +17,7 @@ dependencies = [
     "langchain-openai>=1.0.3",
     "rapidocr-onnxruntime>=1.4.4",
     "sentence-transformers>=5.1.2",
+    "sqlite-web>=0.6.8",
     "streamlit>=1.51.0",
     "validators>=0.35.0",
 ]
