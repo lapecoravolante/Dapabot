@@ -22,19 +22,13 @@ class StoricoChat:
         return conn
 
     @classmethod
-    def crea_db(cls, nome: str = ""):
-        if nome:
-            cls.nome_db = nome
-
-        try:
-            os.remove(cls.nome_db)
-        except FileNotFoundError:
-            pass
-
-        # Crea solo il file / schema, poi chiude connessione
+    def _ensure_schema(cls):
+        """
+        Crea tutte le tabelle necessarie se non esistono già.
+        Questo evita errori quando il DB è nuovo o appena creato.
+        """
         conn = cls._get_connection()
         cursor = conn.cursor()
-
         cursor.execute("PRAGMA foreign_keys = ON;")
 
         cursor.execute("""
@@ -75,11 +69,13 @@ class StoricoChat:
             PRIMARY KEY(id_chat, messaggio_id)
         );
         """)
+
         conn.commit()
         conn.close()
 
     @classmethod
     def salva_chat(cls, provider: str, modello: str, cronologia: List[Messaggio]):
+        cls._ensure_schema()
         conn = cls._get_connection()
         cursor = conn.cursor()
 
@@ -130,6 +126,7 @@ class StoricoChat:
 
     @classmethod
     def carica_cronologia(cls, provider: str, modello: str) -> List[Messaggio]:
+        cls._ensure_schema()
         conn = cls._get_connection()
         cursor = conn.cursor()
 
@@ -143,7 +140,6 @@ class StoricoChat:
             return []
 
         chat_id = row["id"]
-
         cursor.execute("""
         SELECT m.id, m.ruolo, m.contenuto
         FROM MessaggiInChat mic
@@ -162,6 +158,7 @@ class StoricoChat:
 
     @classmethod
     def cancella_cronologia(cls, provider: str, modello: str):
+        cls._ensure_schema()
         conn = cls._get_connection()
         cursor = conn.cursor()
 
@@ -199,76 +196,31 @@ class StoricoChat:
 
     @classmethod
     def esporta_json(cls) -> str:
+        cls._ensure_schema()
         conn = cls._get_connection()
         cursor = conn.cursor()
 
-        export_data = {}
-        for table in ["Provider", "Modello", "Messaggio", "Chat", "MessaggiInChat"]:
-            try:
-                cursor.execute(f"SELECT * FROM {table};")
-                rows = cursor.fetchall()
-                # lista di dict per ogni tabella
-                export_data[table] = [dict(row) for row in rows]
-            except sqlite3.OperationalError:
-                # se la tabella non esiste, la rappresentiamo con lista vuota
-                export_data[table] = []
+        def fetch_all(table):
+            cursor.execute(f"SELECT * FROM {table};")
+            return [dict(row) for row in cursor.fetchall()]
+
+        export_data = {
+            "Provider": fetch_all("Provider"),
+            "Modello": fetch_all("Modello"),
+            "Messaggio": fetch_all("Messaggio"),
+            "Chat": fetch_all("Chat"),
+            "MessaggiInChat": fetch_all("MessaggiInChat")
+        }
 
         conn.close()
         return json.dumps(export_data, indent=2)
 
     @classmethod
     def importa_json(cls, json_data: str):
-        # Assicura schema (crea tabelle se non ci sono)
+        # Assicura schema prima di importare
+        cls._ensure_schema()
         conn = cls._get_connection()
         cursor = conn.cursor()
-
-        # crea lo schema minimo senza eliminare tabelle esistenti
-        cursor.execute("PRAGMA foreign_keys = ON;")
-
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Provider (
-            id TEXT PRIMARY KEY
-        );
-        """)
-
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Modello (
-            id TEXT PRIMARY KEY,
-            provider TEXT,
-            FOREIGN KEY(provider) REFERENCES Provider(id) ON DELETE CASCADE
-        );
-        """)
-
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Messaggio (
-            id TEXT PRIMARY KEY,
-            ruolo TEXT NOT NULL,
-            contenuto TEXT NOT NULL
-        );
-        """)
-
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Chat (
-            provider TEXT NOT NULL,
-            modello TEXT NOT NULL,
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            UNIQUE(provider, modello),
-            FOREIGN KEY(provider) REFERENCES Provider(id) ON DELETE CASCADE,
-            FOREIGN KEY(modello) REFERENCES Modello(id) ON DELETE CASCADE
-        );
-        """)
-
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS MessaggiInChat (
-            id_chat INTEGER,
-            messaggio_id TEXT,
-            FOREIGN KEY(id_chat) REFERENCES Chat(id) ON DELETE CASCADE,
-            FOREIGN KEY(messaggio_id) REFERENCES Messaggio(id) ON DELETE CASCADE,
-            PRIMARY KEY(id_chat, messaggio_id)
-        );
-        """)
-
-        conn.commit()
 
         data = json.loads(json_data)
 
@@ -301,13 +253,9 @@ class StoricoChat:
         conn.commit()
         conn.close()
 
-    # ───────────────────────────────────────────────────────────────
-    # sqlite-web (browser DB) support
-    # ───────────────────────────────────────────────
-
+    # — sqlite-web integration (unchanged) —
     @classmethod
     def _is_port_in_use(cls, host: str, port: int) -> bool:
-        """Verifica se la porta è già occupata."""
         try:
             with socket.create_connection((host, port), timeout=0.5):
                 return True
@@ -316,17 +264,8 @@ class StoricoChat:
 
     @classmethod
     def start_sqlite_web_server(cls, host: str = "127.0.0.1", port: int = 8080, no_browser: bool = True) -> bool:
-        """
-        Avvia il server sqlite-web per il DB.
-        Ritorna True se il server è avviato o già attivo, False altrimenti.
-        """
-        cls._sqlite_web_host = host
-        cls._sqlite_web_port = port
-
-        # Se già raggiungibile sulla porta, consideralo attivo.
         if cls._is_port_in_use(host, port):
             return True
-
         try:
             args = ["sqlite_web", cls.nome_db, "--host", host, "--port", str(port)]
             if no_browser:
@@ -339,22 +278,8 @@ class StoricoChat:
 
     @classmethod
     def is_sqlite_web_active(cls) -> bool:
-        """Ritorna True se il server è raggiungibile."""
         return cls._is_port_in_use(cls._sqlite_web_host, cls._sqlite_web_port)
 
     @classmethod
     def get_sqlite_web_url(cls) -> str:
-        """Ritorna l’URL di accesso alla web UI."""
         return f"http://{cls._sqlite_web_host}:{cls._sqlite_web_port}/"
-
-    @classmethod
-    def _table_exists(cls, table_name: str) -> bool:
-        conn = cls._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name=?;
-        """, (table_name,))
-        exists = cursor.fetchone() is not None
-        conn.close()
-        return exists
