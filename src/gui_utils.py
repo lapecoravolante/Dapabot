@@ -1,6 +1,7 @@
 import streamlit as st
 import extra_streamlit_components as stx
-from typing import Dict, List, Tuple
+from typing import Dict
+from datetime import datetime
 from src.Messaggio import Messaggio
 from src.Configurazione import Configurazione
 from src.providers.loader import Loader
@@ -278,12 +279,15 @@ def crea_sidebar(providers: Dict[str, Provider]):
                             StoricoChat.salva_chat(nome_p, mod_corr, prov.get_cronologia_messaggi())
                     st.toast("Tutte le cronologie salvate", icon="🗃️")
             with st.popover("🔁 Importa/esporta..."):    
-                # Esporta DB JSON
+                # Esporta DB JSON                
+                # genera la stringa di data/ora
+                ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                filename = f"storico_{ts}.json"
                 json_data = StoricoChat.esporta_json()
                 st.download_button(
                     label="⬇️ Export DB in Json",
                     data=json_data,
-                    file_name="storico_chat.json",
+                    file_name=filename,
                     mime="application/json"
                 )
                 # Importa DB JSON
