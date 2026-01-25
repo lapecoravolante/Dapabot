@@ -9,14 +9,13 @@ provider_scelto, messaggio_di_sistema = crea_sidebar(st.session_state.providers)
 
 provider : Provider = providers[provider_scelto]                         
 if provider.disponibile():
-    prompt = st.chat_input("Scrivi il tuo messaggio...", accept_file="multiple")
     mostra_cronologia_chat(provider.get_cronologia_messaggi())
+    prompt = st.chat_input("Scrivi il tuo messaggio...", accept_file="multiple")
     if prompt: # invia il messaggio al modello e carica la cronologia comprensiva di risposta
         try:
             generate_response(prompt, messaggio_di_sistema, provider)
         except Exception as e:
-            # Mostra l'errore come messaggio della chat
-            # Usa il timestamp del messaggio utente se disponibile
+            # Mostra l'errore come se fosse un messaggio della chat
             timestamp = datetime.now().strftime("%H:%M:%S")
             with st.chat_message("assistant"):
                 st.markdown(

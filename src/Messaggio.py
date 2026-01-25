@@ -1,7 +1,7 @@
 from datetime import datetime
 
 class Messaggio():
-    def __init__(self, testo="", ruolo="", allegati=[], timestamp=""):
+    def __init__(self, testo="", ruolo="", allegati=[], timestamp="", id=None):
         self._mappa_ruoli = {
             "assistant": "assistant",
             "tool": "assistant",
@@ -11,10 +11,17 @@ class Messaggio():
             "ai": "ai"
         }    
         self._ruolo=""
-        self._allegati=allegati # i file allegati al messaggio
+        self._id=id
+        self._allegati=allegati # i file allegati al messaggioz
         self.set_testo(testo)
         self.set_ruolo(ruolo)
         self.set_timestamp(timestamp)
+        
+    def get_id(self):
+        return self._id
+    
+    def set_id(self, id=None):
+        self._id=id
         
     def get_testo(self):
         return self._testo

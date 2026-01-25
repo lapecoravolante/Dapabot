@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.messages import HumanMessage, SystemMessage, AIMessage
+from typing import List
+from datetime import datetime
 from src.Messaggio import Messaggio
 from src.Allegato import Allegato
 from src.Configurazione import Configurazione
@@ -30,7 +32,8 @@ class Provider(ABC):
                 self._api_key=p["api_key"]
                 self._modello_scelto=p["modello"]
                 if self._modello_scelto is not None: 
-                    self._cronologia_messaggi[self._modello_scelto]=[]
+                    # lista di tuple in cui il primo elemento è un messaggio in formato Langchain e il secondo è la corrispondente istanza di Messaggio
+                    self._cronologia_messaggi[self._modello_scelto]=[] 
                 self.set_rag(attivo=p[Configurazione.RAG_KEY]["attivo"], 
                              topk=p[Configurazione.RAG_KEY]["top_k"],
                              modello=p[Configurazione.RAG_KEY]["modello"],
@@ -125,6 +128,7 @@ class Provider(ABC):
         """Invia i messaggi al modello multimodale e aggiorna la cronologia."""
         if not self._modello_scelto:
             raise Exception("Client non inizializzato. Inserisci un'API KEY valida e scegli un modello.")
+        # lista di tuple in cui il primo elemento è un messaggio in formato Langchain e il secondo è lo stesso elemento ma in formato "Messaggio"
         cronologia_modello = self._cronologia_messaggi[self._modello_scelto]
         messaggi_da_inviare = []  
         preambolo_rag=" \nRispondi dando priorità al contesto fornito di seguito: \n"
@@ -157,39 +161,48 @@ class Provider(ABC):
                         pass
             # Crea il prompt template
             prompt = ChatPromptTemplate.from_messages([
-                *cronologia_modello,        # cronologia precedente
+                *[messaggio[0] for messaggio in cronologia_modello],        # cronologia precedente
                 *messaggi_da_inviare,       # nuovi messaggi
             ])
             # Crea la catena e invoca il modello
             base_chain = prompt | self._client
             risposta = base_chain.invoke({})
-            # Aggiungo il messaggio utente alla cronologia
-            cronologia_modello.extend(messaggi_da_inviare)
+            # Aggiungo i messaggi utente alla cronologia
+            cronologia_modello.extend([(m, self._converti_messaggio(m)) for m in messaggi_da_inviare])
             # Aggiungo la risposta del modello alla cronologia
             testo_risposta = getattr(risposta, "content", risposta)
             allegati_risposta = getattr(risposta, "content_blocks", [])
-            cronologia_modello.append(AIMessage(content=testo_risposta, content_blocks=allegati_risposta))
+            m=AIMessage(content=testo_risposta, content_blocks=allegati_risposta)
+            cronologia_modello.append((m, self._converti_messaggio(m)))
         except Exception as errore:
             raise Exception(f"Errore nell'invio del messaggio: {errore}")
             
-    def get_cronologia_messaggi(self): 
-        cronologia_da_ritornare: list[Messaggio] = list()
-        for m in self._cronologia_messaggi[self._modello_scelto]:
-            ruolo=m.type
-            testo=""
-            allegati: list[Allegato]=list()
-            for blocco in m.content_blocks:
-                tipo = blocco["type"]
-                # aggiunge i blocchi di tipo testo al testo principale del messaggio
-                if tipo == "text": 
-                    testo += blocco["text"] + "\n"
-                # Tutti gli altri tipi diventano Allegato
-                else: 
-                    contenuto = base64.b64decode(blocco["base64"]) if "base64" in blocco else blocco.get("text", "")
-                    mime_type = blocco.get("mime_type", tipo)
-                    allegati.append(Allegato(tipo=tipo, contenuto=contenuto, mime_type=mime_type))    
-            cronologia_da_ritornare.append(Messaggio(testo=testo, ruolo=ruolo, allegati=allegati))
-        return cronologia_da_ritornare
+    def _converti_messaggio(self, m):
+        ruolo=m.type
+        testo=""
+        allegati: list[Allegato]=list()
+        for blocco in m.content_blocks:
+            tipo = blocco["type"]
+            timestamp=datetime.now()
+            # aggiunge i blocchi di tipo testo al testo principale del messaggio
+            if tipo == "text": 
+                testo += blocco["text"] + "\n"
+            # Tutti gli altri tipi diventano Allegato
+            else: 
+                contenuto = base64.b64decode(blocco["base64"]) if "base64" in blocco else blocco.get("text", "")
+                mime_type = blocco.get("mime_type", tipo)
+                allegati.append(Allegato(tipo=tipo, contenuto=contenuto, mime_type=mime_type))    
+        return Messaggio(testo=testo, ruolo=ruolo, allegati=allegati, timestamp=timestamp, id=f"{self._nome}-{self._modello_scelto}-{timestamp}")
+        
+    """ 
+    Ritorna la lista di messaggi nella cronologia del modello scelto in formato "Messaggio".
+    self._cronologia_messaggi[self._modello_scelto] è una lista di tuple (m0, m1) in cui m0 
+    è un messaggio in formato Langchain (quindi un'istanza di HumanMessage, AIMEssage,...) mentre
+    m1 è un'istanza della classe Messaggio, usata per mostrare il contenuto sulla GUI e per i salvataggi 
+sul DB. Questo metodo ritorna una lista di m1.
+    """
+    def get_cronologia_messaggi(self) -> List[Messaggio]: 
+        return [m[1] for m in self._cronologia_messaggi[self._modello_scelto]]
         
     @abstractmethod
     def lista_modelli_rag(self):
