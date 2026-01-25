@@ -3,30 +3,27 @@ import os
 import json
 import subprocess
 import socket
+import base64
 from typing import List
+from uuid import uuid4
 from src.Messaggio import Messaggio
+from src.Allegato import Allegato
 
 class StoricoChat:
     nome_db: str = "storico_chat.db"
-
-    # Stato interno del server sqlite-web
     _sqlite_web_process = None
     _sqlite_web_host = "127.0.0.1"
     _sqlite_web_port = 8080
 
     @classmethod
     def _get_connection(cls):
-        """Crea e ritorna una nuova connessione SQLite locale."""
         conn = sqlite3.connect(cls.nome_db)
         conn.row_factory = sqlite3.Row
         return conn
 
     @classmethod
     def _ensure_schema(cls):
-        """
-        Crea tutte le tabelle necessarie se non esistono già.
-        Questo evita errori quando il DB è nuovo o appena creato.
-        """
+        """Crea tutte le tabelle se non esistono."""
         conn = cls._get_connection()
         cursor = conn.cursor()
         cursor.execute("PRAGMA foreign_keys = ON;")
@@ -69,9 +66,33 @@ class StoricoChat:
             PRIMARY KEY(id_chat, messaggio_id)
         );
         """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Allegato (
+            id TEXT PRIMARY KEY,
+            messaggio_id TEXT NOT NULL,
+            tipo TEXT NOT NULL,
+            mime_type TEXT,
+            base64 TEXT,
+            FOREIGN KEY(messaggio_id) REFERENCES Messaggio(id) ON DELETE CASCADE
+        );
+        """)
 
         conn.commit()
         conn.close()
+
+    @classmethod
+    def _encode_allegato(cls, allegato: Allegato) -> str:
+        """
+        Restituisce la rappresentazione Base64 dell'allegato:
+        - se allegato.contenuto è bytes, codificalo
+        - se è già str, torna direttamente la stringa
+        """
+        contenuto = allegato.contenuto
+        if isinstance(contenuto, (bytes, bytearray)):
+            return base64.b64encode(contenuto).decode("utf-8")
+        else:
+            # è presumibilmente testo
+            return str(contenuto)
 
     @classmethod
     def salva_chat(cls, provider: str, modello: str, cronologia: List[Messaggio]):
@@ -121,6 +142,16 @@ class StoricoChat:
             VALUES (?, ?);
             """, (chat_id, msg_id))
 
+            # salva gli allegati in Base64
+            for allegato in mess.get_allegati():
+                allegato_uuid = f"{msg_id}-{uuid4().hex}"
+                b64_str = cls._encode_allegato(allegato)
+                cursor.execute("""
+                INSERT OR IGNORE INTO Allegato
+                (id, messaggio_id, tipo, mime_type, base64)
+                VALUES (?, ?, ?, ?, ?);
+                """, (allegato_uuid, msg_id, allegato.tipo, allegato.mime_type, b64_str))
+
         conn.commit()
         conn.close()
 
@@ -140,6 +171,7 @@ class StoricoChat:
             return []
 
         chat_id = row["id"]
+
         cursor.execute("""
         SELECT m.id, m.ruolo, m.contenuto
         FROM MessaggiInChat mic
@@ -148,10 +180,28 @@ class StoricoChat:
         ORDER BY m.id;
         """, (chat_id,))
 
-        messaggi = [
-            Messaggio(testo=r["contenuto"], ruolo=r["ruolo"], id=r["id"])
-            for r in cursor.fetchall()
-        ]
+        messaggi = []
+        for r in cursor.fetchall():
+            msg_id = r["id"]
+            testo = r["contenuto"]
+            ruolo = r["ruolo"]
+
+            # carica gli allegati salvati in Base64
+            cursor.execute("""
+            SELECT tipo, mime_type, base64 FROM Allegato
+            WHERE messaggio_id=?;
+            """, (msg_id,))
+            allegati = []
+            for a in cursor.fetchall():
+                base64_str = a["base64"]
+                # NON decodifichiamo qui: lo lasciamo Base64
+                allegati.append(
+                    Allegato(tipo=a["tipo"], contenuto=base64_str, mime_type=a["mime_type"])
+                )
+
+            messaggi.append(
+                Messaggio(testo=testo, ruolo=ruolo, allegati=allegati, id=msg_id)
+            )
 
         conn.close()
         return messaggi
@@ -165,26 +215,8 @@ class StoricoChat:
         cursor.execute("""
         DELETE FROM Chat WHERE provider=? AND modello=?;
         """, (provider, modello))
-        conn.commit()
 
-        cursor.execute("""
-        DELETE FROM Messaggio
-        WHERE id NOT IN (SELECT messaggio_id FROM MessaggiInChat);
-        """)
         conn.commit()
-
-        cursor.execute("""
-        DELETE FROM Modello
-        WHERE id NOT IN (SELECT modello FROM Chat);
-        """)
-        conn.commit()
-
-        cursor.execute("""
-        DELETE FROM Provider
-        WHERE id NOT IN (SELECT provider FROM Chat);
-        """)
-        conn.commit()
-
         conn.close()
 
     @classmethod
@@ -204,24 +236,23 @@ class StoricoChat:
             cursor.execute(f"SELECT * FROM {table};")
             return [dict(row) for row in cursor.fetchall()]
 
-        export_data = {
+        data = {
             "Provider": fetch_all("Provider"),
             "Modello": fetch_all("Modello"),
             "Messaggio": fetch_all("Messaggio"),
             "Chat": fetch_all("Chat"),
-            "MessaggiInChat": fetch_all("MessaggiInChat")
+            "MessaggiInChat": fetch_all("MessaggiInChat"),
+            "Allegato": fetch_all("Allegato")
         }
 
         conn.close()
-        return json.dumps(export_data, indent=2)
+        return json.dumps(data, indent=2)
 
     @classmethod
     def importa_json(cls, json_data: str):
-        # Assicura schema prima di importare
         cls._ensure_schema()
         conn = cls._get_connection()
         cursor = conn.cursor()
-
         data = json.loads(json_data)
 
         for p in data.get("Provider", []):
@@ -229,7 +260,8 @@ class StoricoChat:
 
         for m in data.get("Modello", []):
             cursor.execute("""
-            INSERT OR IGNORE INTO Modello (id, provider) VALUES (?, ?);
+            INSERT OR IGNORE INTO Modello (id, provider)
+            VALUES (?, ?);
             """, (m["id"], m["provider"]))
 
         for msg in data.get("Messaggio", []):
@@ -250,10 +282,17 @@ class StoricoChat:
             VALUES (?, ?);
             """, (mic["id_chat"], mic["messaggio_id"]))
 
+        for al in data.get("Allegato", []):
+            cursor.execute("""
+            INSERT OR IGNORE INTO Allegato
+            (id, messaggio_id, tipo, mime_type, base64)
+            VALUES (?, ?, ?, ?, ?);
+            """, (al["id"], al["messaggio_id"], al["tipo"], al["mime_type"], al["base64"]))
+
         conn.commit()
         conn.close()
 
-    # — sqlite-web integration (unchanged) —
+    # — sqlite-web support (unchanged)
     @classmethod
     def _is_port_in_use(cls, host: str, port: int) -> bool:
         try:
