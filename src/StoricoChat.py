@@ -84,8 +84,8 @@ class StoricoChat:
     def _encode_allegato(cls, allegato: Allegato) -> str:
         """
         Restituisce la rappresentazione Base64 dell'allegato:
-        - se allegato.contenuto è bytes, codificalo
-        - se è già str, torna direttamente la stringa
+        - se allegato.contenuto è binario, lo codifica
+        - se è plain/text ritorna direttamente la stringa
         """
         contenuto = allegato.contenuto
         if isinstance(contenuto, (bytes, bytearray)):
@@ -193,21 +193,16 @@ class StoricoChat:
             """, (msg_id,))
             allegati = []
             for a in cursor.fetchall():
-                base64_str = a["base64"]
-                # NON decodifichiamo qui: lo lasciamo Base64
-                allegati.append(
-                    Allegato(tipo=a["tipo"], contenuto=base64_str, mime_type=a["mime_type"])
-                )
-
-            messaggi.append(
-                Messaggio(testo=testo, ruolo=ruolo, allegati=allegati, id=msg_id)
-            )
+                contenuto = base64.b64decode(a["base64"])
+                # Decodifico il contenuto dell'allegato
+                allegati.append(Allegato(tipo=a["tipo"], contenuto=contenuto, mime_type=a["mime_type"]))
+            messaggi.append(Messaggio(testo=testo, ruolo=ruolo, allegati=allegati, id=msg_id))
 
         conn.close()
         return messaggi
 
     @classmethod
-    def cancella_cronologia(cls, provider: str, modello: str):
+    def cancella_chat(cls, provider: str, modello: str):
         cls._ensure_schema()
         conn = cls._get_connection()
         cursor = conn.cursor()
@@ -292,7 +287,6 @@ class StoricoChat:
         conn.commit()
         conn.close()
 
-    # — sqlite-web support (unchanged)
     @classmethod
     def _is_port_in_use(cls, host: str, port: int) -> bool:
         try:

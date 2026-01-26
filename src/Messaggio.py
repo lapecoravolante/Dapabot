@@ -12,7 +12,7 @@ class Messaggio():
         }    
         self._ruolo=""
         self._id=id
-        self._allegati=allegati # i file allegati al messaggioz
+        self._allegati=allegati # i file allegati al messaggio
         self.set_testo(testo)
         self.set_ruolo(ruolo)
         self.set_timestamp(timestamp)

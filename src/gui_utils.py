@@ -263,22 +263,22 @@ def crea_sidebar(providers: Dict[str, Provider]):
             if st.button("Cache...", key="btn_vs_global", help="Gestisci tutti i vector store di tutti i provider", icon="🗄️"):
                 st.session_state["vs_dialog_global_open"] = True
         # ──────────────────────────────────────────────────────────────────────────────
-        # Sezione Croologie
+        # Sezione Cronologie
         # ──────────────────────────────────────────────────────────────────────────────
-        with st.expander("💬 Gestione cronologie chat", expanded=False):
-            with st.popover("💾 Salva cronologia..."):    
+        with st.expander("💬 Gestione chat", expanded=False):
+            with st.popover("💾 Salva chat..."):    
                 # Pulsante: Salva cronologia corrente
-                if st.button("💾 Salva cronologia corrente"):
+                if st.button("💾 Salva chat corrente"):
                     cronologia = provider.get_cronologia_messaggi()
-                    StoricoChat.salva_chat(provider_scelto, st.session_state[modello_key], cronologia)
-                    st.toast("Cronologia salvata nel DB", icon="💾")
+                    StoricoChat.salva_chat(provider_scelto, modello_scelto, cronologia)
+                    st.toast("Chat salvata nel DB", icon="💾")
                 # Pulsante: Salva tutte le cronologie
-                if st.button("🗃️ Salva tutte le cronologie"):
+                if st.button("🗃️ Salva tutte le chat"):
                     for nome_p, prov in providers.items():
                         mod_corr = prov.get_modello_scelto()
                         if mod_corr:
                             StoricoChat.salva_chat(nome_p, mod_corr, prov.get_cronologia_messaggi())
-                    st.toast("Tutte le cronologie salvate", icon="🗃️")
+                    st.toast("Tutte le chat salvate", icon="🗃️")
             with st.popover("🔁 Importa/esporta..."):    
                 # Esporta DB JSON                
                 # genera la stringa di data/ora
@@ -298,15 +298,20 @@ def crea_sidebar(providers: Dict[str, Provider]):
                     StoricoChat.importa_json(text)
                     st.toast("Importazione completata!", icon="✔️")
             
-            with st.popover("🚮 Elimina cronologia..."):    
-                # Cancella cronologia corrente
-                if st.button("🗑️ Cancella cronologia corrente"):
-                    StoricoChat.cancella_cronologia(provider_scelto, st.session_state[modello_key])
-                    st.toast("Cronologia cancellata", icon="🗑️")      
+            with st.popover("🚮 Elimina chat..."):    
+                
+                # cancella la cronologia corrente in ram
+                if st.button("🧹 Ripulisci chat"):
+                    provider.ripulisci_chat(modello_scelto)
+                    st.toast("Chat ripulita", icon="🧹")
+                # Cancella cronologia dal disco
+                if st.button("🗑️ Cancella chat dal disco"):
+                    StoricoChat.cancella_chat(provider_scelto, modello_scelto)
+                    st.toast("Chat cancellata", icon="🗑️")      
                 # Cancella tutto il DB
-                if st.button("🧹 Cancella tutto il DB"):
+                if st.button("🔥 Cancella tutto il DB"):
                     StoricoChat.cancella_tutto()
-                    st.toast("DB cancellato", icon="🧹")
+                    st.toast("DB cancellato", icon="🔥")
 
             # Gestisci cronologie (placeholder)
             if StoricoChat.is_sqlite_web_active():
@@ -325,8 +330,6 @@ def crea_sidebar(providers: Dict[str, Provider]):
                         st.toast("Server DB avviato", icon="🌐")
                     else:
                         st.error("Avvio sqlite‑web fallito")
-
-
 
         # Salva configurazione (tutti i provider)
         st.button("Salva configurazione", key="salva", on_click=salva_configurazione, args=[providers])

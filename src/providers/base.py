@@ -1,12 +1,13 @@
 from abc import ABC, abstractmethod
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.messages import HumanMessage, SystemMessage, AIMessage
-from typing import List
+from typing import List, Tuple
 from datetime import datetime
 from src.Messaggio import Messaggio
 from src.Allegato import Allegato
 from src.Configurazione import Configurazione
 from src.providers.rag import Rag
+from src.StoricoChat import StoricoChat
 import base64, validators
 
 class Provider(ABC):
@@ -33,12 +34,39 @@ class Provider(ABC):
                 self._modello_scelto=p["modello"]
                 if self._modello_scelto is not None: 
                     # lista di tuple in cui il primo elemento è un messaggio in formato Langchain e il secondo è la corrispondente istanza di Messaggio
-                    self._cronologia_messaggi[self._modello_scelto]=[] 
+                    self._cronologia_messaggi[self._modello_scelto]=None 
                 self.set_rag(attivo=p[Configurazione.RAG_KEY]["attivo"], 
                              topk=p[Configurazione.RAG_KEY]["top_k"],
                              modello=p[Configurazione.RAG_KEY]["modello"],
                              upload_dir=p[Configurazione.RAG_KEY]["directory_allegati"],
                              modalita_ricerca=p[Configurazione.RAG_KEY]["modalita_ricerca"])
+
+    def _carica_cronologia_da_disco(self, modello) -> List[Tuple]:
+        # ricostruisco la cronologia prendendo i messaggi dal disco e ricostruendo l'equivalente messaggio in formato Langchain
+        messaggi_su_disco=StoricoChat.carica_cronologia(self._nome, modello)
+        tuple_da_ritornare=[]
+        for m in messaggi_su_disco:
+            match m.get_ruolo():
+                case "system":
+                    tuple_da_ritornare.append((SystemMessage(content=m.get_testo()), m))
+                case "user"|"ai"|"assistant":
+                    blocchi=[{"type": "text", "text": m.get_testo()}]
+                    for allegato in m.get_allegati():
+                        contenuto = allegato.contenuto
+                        tipo      = allegato.tipo
+                        mime_type = allegato.mime_type
+                        filename  = allegato.filename
+                        if tipo in ("image", "video", "audio"):
+                            blocchi.append({"type": tipo, "mime_type": mime_type, "base64": contenuto})
+                        elif mime_type=="text/plain":
+                            blocchi.append({"type": "text-plain", "mime_type": mime_type, "text": contenuto})
+                        else:
+                            blocchi.append({"type": "file", "mime_type": mime_type, "base64": contenuto, "filename": filename})
+                    if m.get_ruolo()=="user":
+                        tuple_da_ritornare.append((HumanMessage(content_blocks=blocchi), m))
+                    else:
+                        tuple_da_ritornare.append((AIMessage(content_blocks=blocchi), m))
+        return tuple_da_ritornare
 
     def to_dict(self):
         return {
@@ -58,11 +86,21 @@ class Provider(ABC):
     def get_prefisso_token(self):
         return self._prefisso_token
     
-    def set_modello_scelto(self, modello):
+    def ripulisci_chat(self, modello):
         if modello:
-            self._modello_scelto=modello
-            if modello not in self._cronologia_messaggi:
-                self._cronologia_messaggi[modello]=[]
+            self._cronologia_messaggi[modello] = []
+    
+    def set_modello_scelto(self, modello):
+        if not modello:
+            return
+        self._modello_scelto=modello
+        # se non è presente nessuna cronologia per il modello...
+        if modello not in self._cronologia_messaggi: 
+            # ...allora la carico dal disco
+            self._cronologia_messaggi[modello]=self._carica_cronologia_da_disco(modello)
+        # se è None vuol dire che è la voce relativa al modello di default
+        elif self._cronologia_messaggi[modello] is None:
+            self._cronologia_messaggi[modello] = self._carica_cronologia_da_disco(modello)
         
     def set_baseurl(self, base_url):
         if (validators.url(base_url)):
@@ -115,9 +153,7 @@ class Provider(ABC):
         try:
             self.set_apikey(api_key=api_key)
             self._client=self._crea_client(base_url=self._base_url, modello=modello, api_key=api_key)
-            self._modello_scelto = modello
-            if modello not in self._cronologia_messaggi:
-                self._cronologia_messaggi[modello]=[]
+            self.set_modello_scelto(modello)
             self.set_disponibile(True)
         except Exception as errore:
             self.set_disponibile(False)
@@ -199,10 +235,12 @@ class Provider(ABC):
     self._cronologia_messaggi[self._modello_scelto] è una lista di tuple (m0, m1) in cui m0 
     è un messaggio in formato Langchain (quindi un'istanza di HumanMessage, AIMEssage,...) mentre
     m1 è un'istanza della classe Messaggio, usata per mostrare il contenuto sulla GUI e per i salvataggi 
-sul DB. Questo metodo ritorna una lista di m1.
+    sul DB. Questo metodo ritorna una lista di m1.
     """
     def get_cronologia_messaggi(self) -> List[Messaggio]: 
-        return [m[1] for m in self._cronologia_messaggi[self._modello_scelto]]
+        if not self._modello_scelto:
+            return []
+        return [tupla[1] for tupla in self._cronologia_messaggi[self._modello_scelto]]
         
     @abstractmethod
     def lista_modelli_rag(self):
