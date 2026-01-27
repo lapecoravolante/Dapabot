@@ -17,12 +17,17 @@ def inizializza():
     if "providers" not in st.session_state:  # carica i providers una sola volta
         st.session_state.providers = Loader.discover_providers()
     providers = st.session_state.providers  # shortcut
-    
+        
     # verifico se bisogna ripristinare sulla gui una chat recente    
     provider_da_ripristinare = modello_da_ripristinare = ""
     if "ripristina_chat" in st.session_state and st.session_state["ripristina_chat"]:
         provider_da_ripristinare, modello_da_ripristinare = st.session_state.get("ripristina_chat", ("", "")).split(" | ")
-    if "provider_scelto" not in st.session_state and provider_da_ripristinare:
+        st.session_state["ripristina_chat"]=""
+    
+    # imposto il default per la tab_bar
+    if "provider_scelto" not in st.session_state: # vero se è il primo avvio dell'applicazione
+        st.session_state["provider_scelto"] = next(iter(providers))
+    elif provider_da_ripristinare: # potrebbe essere vero ai rerun successivi al primo
         st.session_state["provider_scelto"] = provider_da_ripristinare
         
     for nome, provider in providers.items():
@@ -220,7 +225,8 @@ def crea_sidebar(providers: Dict[str, Provider]):
 
         # Selectbox: Modello 
         if modelli:   
-            st.session_state[modello_key] = st.session_state[provider_scelto][modello_key]
+            if modello_key not in st.session_state:
+                st.session_state[modello_key] = st.session_state[provider_scelto][modello_key]
             modello_scelto = st.selectbox("👾 Modello", modelli, key=modello_key,
                 #index=modelli.index(st.session_state[provider_scelto][modello_key]) if st.session_state[provider_scelto][modello_key] in modelli else 0,
                 on_change=sincronizza_sessione, args=(modello_key,)
@@ -284,7 +290,8 @@ def crea_sidebar(providers: Dict[str, Provider]):
                     # Aggiorna la selezione del modello per quel provider                    "
                     key_mod = f"modello_{prov}"
                     st.session_state[key_mod] = mod
-            chat_recenti = [""] + [f"{prov} | {mod}" for prov, mod in StoricoChat.ritorna_chat_recenti()]
+                    
+            chat_recenti = ["",] + [f"{prov} | {mod}" for prov, mod in StoricoChat.ritorna_chat_recenti()]
             if chat_recenti:
                 st.selectbox("📂 Riapri chat recente:", options=chat_recenti, key="ripristina_chat", on_change=on_ripristina_chat)
             else:
