@@ -17,19 +17,18 @@ def inizializza():
     if "providers" not in st.session_state:  # carica i providers una sola volta
         st.session_state.providers = Loader.discover_providers()
     providers = st.session_state.providers  # shortcut
-        
+    
+    # Se non c'è ancora un provider selezionato nella sessione, seleziona il primo provider come predefinito
+    if "tabbar_key" not in st.session_state:
+        st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"
+            
     # verifico se bisogna ripristinare sulla gui una chat recente    
     provider_da_ripristinare = modello_da_ripristinare = ""
     if "ripristina_chat" in st.session_state and st.session_state["ripristina_chat"]:
         provider_da_ripristinare, modello_da_ripristinare = st.session_state.get("ripristina_chat", ("", "")).split(" | ")
+        st.session_state["provider_da_ripristinare"]=provider_da_ripristinare
         st.session_state["ripristina_chat"]=""
     
-    # imposto il default per la tab_bar
-    if "provider_scelto" not in st.session_state: # vero se è il primo avvio dell'applicazione
-        st.session_state["provider_scelto"] = next(iter(providers))
-    elif provider_da_ripristinare: # potrebbe essere vero ai rerun successivi al primo
-        st.session_state["provider_scelto"] = provider_da_ripristinare
-        
     for nome, provider in providers.items():
         conf = provider.to_dict()
         rag_conf = conf.get(Configurazione.RAG_KEY, {})
@@ -182,19 +181,36 @@ def mostra_dialog_vectorestores_globale():
 # ──────────────────────────────────────────────────────────────────────────────
 def crea_sidebar(providers: Dict[str, Provider]):
     st.logo(image="src/img/logo.png", size="large")
-
-    # imposto il default per la tab_bar sottostante
-    if "provider_scelto" not in st.session_state:
-        st.session_state["provider_scelto"] = next(iter(providers))
-
+    
     with st.sidebar:
 
         # ──────────────────────────
         # INIZIO COSTRUZIONE SIDEBAR 
         #───────────────────────────
-        # Costruzione tab bar
+        
+        """
+            Di seguito viene creata una tabbar con un widget personalizzato (stx.tab_bar, non standard di streamlit).
+            Il problema dei widget come questo è che non leggono lo stato da st.session_state e quindi non
+            è possibile aggiornarne lo stato scrivendo in st.session_state. Questo significa che se voglio
+            cambiare la tab attiva lo posso fare solo in 2 modi: cliccando col mouse oppure, da codice, distruggendo
+            il widget e ricreandolo con un default diverso. Affinchè streamlit distrugga e ricrei il widget bisogna 
+            cambiargli l'identià, cioè la key che lo individua univocamente dentro st.session_state (cfr.:
+            https://docs.streamlit.io/develop/concepts/architecture/widget-behavior#widget-identity-key-based-vs-parameter-based).
+            Quindi si fa così:
+                1. dentro la funzione "inzializza()" viene generata una chiave random al primo avvio dell'applicazione
+                2. ogni volta che l'utente interagisce col mouse, la tab viene cambiata regolarmente, quindi non ci sono problemi
+                3. ogni volta che si seleziona una chat da ripristinare di un provider diverso da quello attuale, allora la 
+                    callback della selectbox si occupa di cancellare la vecchia key e crearne una nuova, cancellando anche il
+                    riferimento alla vecchia tabbar per evitare che si accumulino riferimenti orfani in st.session_state
+                4. nella "inizializza()" si imposta il provider da assegnare alla nuova tabbar mettendolo dentro "st.session_state["provider_da_ripristinare"]"
+                5. infine qui sotto viene creata la tabbar e selezionata la tab del provider corretto.
+        """
+        # Costruzione della TabBar con una key dinamica
         schede = [stx.TabBarItemData(id=nome, title=nome, description="") for nome in providers]
-        provider_scelto = stx.tab_bar(data=schede, key="provider_scelto")
+        default=schede[0].id
+        if "provider_da_ripristinare" in st.session_state:
+            default=st.session_state["provider_da_ripristinare"]
+        provider_scelto = stx.tab_bar(data=schede, key=st.session_state["tabbar_key"], default=default)
         provider: Provider = providers[provider_scelto]
 
         # Chiavi per il provider corrente
@@ -286,7 +302,10 @@ def crea_sidebar(providers: Dict[str, Provider]):
                 val = st.session_state["ripristina_chat"]
                 if val:
                     prov, mod = val.split(" | ")
-                    st.session_state["provider_scelto"] = prov
+                    # Aggiorna la chiave per la TabBar, forzando la ricreazione del widget e l'aggiornamento del provider corretto
+                    if st.session_state.get(f"{st.session_state['tabbar_key']}"):
+                        del st.session_state[f"{st.session_state['tabbar_key']}"]                    
+                    st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"            
                     # Aggiorna la selezione del modello per quel provider                    "
                     key_mod = f"modello_{prov}"
                     st.session_state[key_mod] = mod
