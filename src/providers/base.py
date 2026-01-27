@@ -88,7 +88,7 @@ class Provider(ABC):
     
     def ripulisci_chat(self, modello):
         if modello:
-            self._cronologia_messaggi[modello] = []
+            self._cronologia_messaggi[modello].clear()
     
     def set_modello_scelto(self, modello):
         if not modello:

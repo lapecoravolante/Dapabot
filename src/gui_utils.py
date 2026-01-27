@@ -17,6 +17,14 @@ def inizializza():
     if "providers" not in st.session_state:  # carica i providers una sola volta
         st.session_state.providers = Loader.discover_providers()
     providers = st.session_state.providers  # shortcut
+    
+    # verifico se bisogna ripristinare sulla gui una chat recente    
+    provider_da_ripristinare = modello_da_ripristinare = ""
+    if "ripristina_chat" in st.session_state and st.session_state["ripristina_chat"]:
+        provider_da_ripristinare, modello_da_ripristinare = st.session_state.get("ripristina_chat", ("", "")).split(" | ")
+    if "provider_scelto" not in st.session_state and provider_da_ripristinare:
+        st.session_state["provider_scelto"] = provider_da_ripristinare
+        
     for nome, provider in providers.items():
         conf = provider.to_dict()
         rag_conf = conf.get(Configurazione.RAG_KEY, {})
@@ -41,6 +49,8 @@ def inizializza():
                 rag_model_key: st.session_state.get(rag_model_key) or provider.get_rag().get_modello() or rag_conf.get("modello", Rag.DEFAULT_EMBEDDING_MODEL),
                 rag_modalita_ricerca_key: st.session_state.get(rag_modalita_ricerca_key) or provider.get_rag().get_modalita_ricerca() or rag_conf.get("modalita_ricerca", Rag.AVAILABLE_SEARCH_MODALITIES[0])
             }
+        if provider_da_ripristinare == nome:
+            st.session_state[nome][modello_key]=modello_da_ripristinare
     return providers
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -173,6 +183,10 @@ def crea_sidebar(providers: Dict[str, Provider]):
         st.session_state["provider_scelto"] = next(iter(providers))
 
     with st.sidebar:
+
+        # ──────────────────────────
+        # INIZIO COSTRUZIONE SIDEBAR 
+        #───────────────────────────
         # Costruzione tab bar
         schede = [stx.TabBarItemData(id=nome, title=nome, description="") for nome in providers]
         provider_scelto = stx.tab_bar(data=schede, key="provider_scelto")
@@ -206,8 +220,9 @@ def crea_sidebar(providers: Dict[str, Provider]):
 
         # Selectbox: Modello 
         if modelli:   
+            st.session_state[modello_key] = st.session_state[provider_scelto][modello_key]
             modello_scelto = st.selectbox("👾 Modello", modelli, key=modello_key,
-                index=modelli.index(st.session_state[provider_scelto][modello_key]) if st.session_state[provider_scelto][modello_key] in modelli else 0,
+                #index=modelli.index(st.session_state[provider_scelto][modello_key]) if st.session_state[provider_scelto][modello_key] in modelli else 0,
                 on_change=sincronizza_sessione, args=(modello_key,)
             )
         else:
@@ -221,7 +236,7 @@ def crea_sidebar(providers: Dict[str, Provider]):
             value=st.session_state[provider_scelto][sysmsg_key],
             on_change=sincronizza_sessione, args=(sysmsg_key,)
         )
-
+        
         # Sezione RAG
         with st.expander("🔎 RAG", expanded=bool(st.session_state[provider_scelto][rag_enabled_key])):
             # Toggle RAG
@@ -252,88 +267,105 @@ def crea_sidebar(providers: Dict[str, Provider]):
                 st.warning("Nessun modello RAG disponibile.", icon="⚠️")
                 modello_rag=""
                 st.session_state[provider_scelto][rag_model_key]=""
-
-            # Aggiorna provider runtime (usa i valori restituiti dai widget)
-            try:
-                provider.set_client(modello_scelto, api_key)
-                provider.set_rag(attivo=rag_abilitato, topk=topk, modello=modello_rag, modalita_ricerca=modalita_ricerca)
-            except Exception as e:
-                st.toast(f"Errore nell'impostazione dei parametri: {e}", icon="⛔")
             # ---- Pulsante globale per aprire la finestra MODALE con TUTTI i vector store ----
             if st.button("Cache...", key="btn_vs_global", help="Gestisci tutti i vector store di tutti i provider", icon="🗄️"):
                 st.session_state["vs_dialog_global_open"] = True
+        
         # ──────────────────────────────────────────────────────────────────────────────
-        # Sezione Cronologie
+        # Sezione Chat
         # ──────────────────────────────────────────────────────────────────────────────
-        with st.expander("💬 Gestione chat", expanded=False):
-            with st.popover("💾 Salva chat..."):    
-                # Pulsante: Salva cronologia corrente
-                if st.button("💾 Salva chat corrente"):
-                    cronologia = provider.get_cronologia_messaggi()
-                    StoricoChat.salva_chat(provider_scelto, modello_scelto, cronologia)
-                    st.toast("Chat salvata nel DB", icon="💾")
-                # Pulsante: Salva tutte le cronologie
-                if st.button("🗃️ Salva tutte le chat"):
-                    for nome_p, prov in providers.items():
-                        mod_corr = prov.get_modello_scelto()
-                        if mod_corr:
-                            StoricoChat.salva_chat(nome_p, mod_corr, prov.get_cronologia_messaggi())
-                    st.toast("Tutte le chat salvate", icon="🗃️")
-            with st.popover("🔁 Importa/esporta..."):    
-                # Esporta DB JSON                
-                # genera la stringa di data/ora
-                ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                filename = f"storico_{ts}.json"
-                json_data = StoricoChat.esporta_json()
-                st.download_button(
-                    label="⬇️ Export DB in Json",
-                    data=json_data,
-                    file_name=filename,
-                    mime="application/json"
-                )
-                # Importa DB JSON
-                json_file = st.file_uploader("📥 Seleziona JSON da importare", type=["json"])
-                if json_file and st.button("📥 Importa cronologie"):
-                    text = json_file.read().decode("utf-8")
-                    StoricoChat.importa_json(text)
-                    st.toast("Importazione completata!", icon="✔️")
-            
-            with st.popover("🚮 Elimina chat..."):    
-                
-                # cancella la cronologia corrente in ram
-                if st.button("🧹 Ripulisci chat"):
-                    provider.ripulisci_chat(modello_scelto)
-                    st.toast("Chat ripulita", icon="🧹")
-                # Cancella cronologia dal disco
-                if st.button("🗑️ Cancella chat dal disco"):
-                    StoricoChat.cancella_chat(provider_scelto, modello_scelto)
-                    st.toast("Chat cancellata", icon="🗑️")      
-                # Cancella tutto il DB
-                if st.button("🔥 Cancella tutto il DB"):
-                    StoricoChat.cancella_tutto()
-                    st.toast("DB cancellato", icon="🔥")
-
-            # Gestisci cronologie (placeholder)
-            if StoricoChat.is_sqlite_web_active():
-                url = StoricoChat.get_sqlite_web_url()
-                st.markdown(
-                    f'<a href="{url}" target="_blank">'
-                    '<button style="width:100%; padding:8px; font-size:1rem;">'
-                    '🔍 Apri gestione DB'
-                    '</button></a>',
-                    unsafe_allow_html=True
-                )
+        with st.expander("💬 Chat", expanded=False):
+            # CHAT RECENTI            
+            def on_ripristina_chat():
+                val = st.session_state["ripristina_chat"]
+                if val:
+                    prov, mod = val.split(" | ")
+                    st.session_state["provider_scelto"] = prov
+                    # Aggiorna la selezione del modello per quel provider                    "
+                    key_mod = f"modello_{prov}"
+                    st.session_state[key_mod] = mod
+            chat_recenti = [""] + [f"{prov} | {mod}" for prov, mod in StoricoChat.ritorna_chat_recenti()]
+            if chat_recenti:
+                st.selectbox("📂 Riapri chat recente:", options=chat_recenti, key="ripristina_chat", on_change=on_ripristina_chat)
             else:
-                if st.button("🔍 Avvia e apri gestione cronologie"):
-                    started = StoricoChat.start_sqlite_web_server()
-                    if started:
-                        st.toast("Server DB avviato", icon="🌐")
-                    else:
-                        st.error("Avvio sqlite‑web fallito")
+                st.caption("📂 Nessuna chat recente")
+                
+            # PULSANTI DI SALVATAGGIO CHAT
+            with st.container(border=True):
+                with st.popover("💾 Salva chat..."):    
+                    # Pulsante: Salva cronologia corrente
+                    if st.button("💾 Salva chat corrente"):
+                        cronologia = provider.get_cronologia_messaggi()
+                        StoricoChat.salva_chat(provider_scelto, modello_scelto, cronologia)
+                        st.toast("Chat salvata nel DB", icon="💾")
+                    # Pulsante: Salva tutte le cronologie
+                    if st.button("🗃️ Salva tutte le chat"):
+                        for nome_p, prov in providers.items():
+                            mod_corr = prov.get_modello_scelto()
+                            if mod_corr:
+                                StoricoChat.salva_chat(nome_p, mod_corr, prov.get_cronologia_messaggi())
+                        st.toast("Tutte le chat salvate", icon="🗃️")
+                with st.popover("🔁 Importa/esporta..."):    
+                    
+                    # PULSANTI DI IMPORT/EXPORT DB
+                    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # genera la stringa di data/ora
+                    filename = f"storico_{ts}.json"
+                    json_data = StoricoChat.esporta_json()
+                    st.download_button(
+                        label="⬇️ Export DB in Json",
+                        data=json_data,
+                        file_name=filename,
+                        mime="application/json"
+                    )
+                    # Importa DB JSON
+                    json_file = st.file_uploader("📥 Seleziona JSON da importare", type=["json"])
+                    if json_file and st.button("📥 Importa cronologie"):
+                        text = json_file.read().decode("utf-8")
+                        StoricoChat.importa_json(text)
+                        st.toast("Importazione completata!", icon="✔️")
+                
+                # PULSANTI DI ELIMINAZIONE CHAT
+                with st.popover("🚮 Elimina chat..."):    
+                    # cancella la cronologia corrente in ram
+                    if st.button("🧹 Ripulisci chat"):
+                        provider.ripulisci_chat(modello_scelto)
+                        st.toast("Chat ripulita", icon="🧹")
+                    # Cancella cronologia dal disco
+                    if st.button("🗑️ Cancella chat dal disco"):
+                        StoricoChat.cancella_chat(provider_scelto, modello_scelto)
+                        st.toast("Chat cancellata", icon="🗑️")      
+                    # Cancella tutto il DB
+                    if st.button("🔥 Cancella tutto il DB"):
+                        StoricoChat.cancella_tutto()
+                        st.toast("DB cancellato", icon="🔥")
+
+                # Gestisci cronologie (placeholder)
+                if StoricoChat.is_sqlite_web_active():
+                    url = StoricoChat.get_sqlite_web_url()
+                    st.markdown(
+                        f'<a href="{url}" target="_blank">'
+                        '<button style="width:100%; padding:8px; font-size:1rem;">'
+                        '🔍 Gestione avanzata DB'
+                        '</button></a>',
+                        unsafe_allow_html=True
+                    )
+                else:
+                    if st.button("🔍 Avvia e apri la gestione avanzata del DB"):
+                        started = StoricoChat.start_sqlite_web_server()
+                        if started:
+                            st.toast("Server DB avviato", icon="🌐")
+                        else:
+                            st.error("Avvio sqlite‑web fallito")
 
         # Salva configurazione (tutti i provider)
         st.button("Salva configurazione", key="salva", on_click=salva_configurazione, args=[providers])
-    #st.sidebar.json(st.session_state)
+        # Aggiorna provider runtime (usa i valori restituiti dai widget)
+        try:
+            provider.set_client(modello_scelto, api_key)
+            provider.set_rag(attivo=rag_abilitato, topk=topk, modello=modello_rag, modalita_ricerca=modalita_ricerca)
+        except Exception as e:
+            st.toast(f"Errore nell'impostazione dei parametri: {e}", icon="⛔")
+    st.sidebar.json(st.session_state)
     
     # ---- Render della finestra modale ----
     if st.session_state.get("vs_dialog_global_open", False):

@@ -13,6 +13,7 @@ COPY . ${APP_HOME}
 # Decommentare l'istruzione seguente per creare un'immagine di circa 9GB con tutte le dipendenze già scaricate.
 #RUN uv sync 
 
-EXPOSE 8501
+# La porta 8501 è per streamlit mentre la 8080 è per sqlite-web
+EXPOSE 8501 8080
 
 ENTRYPOINT ["uv", "run", "streamlit", "run", "dapabot.py", "--server.port=8501", "--server.address=0.0.0.0"]

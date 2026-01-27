@@ -286,6 +286,27 @@ class StoricoChat:
 
         conn.commit()
         conn.close()
+    
+    @classmethod
+    def ritorna_chat_recenti(cls):
+        chat_rows=[]
+        try:
+            cls._ensure_schema()
+            # carichiamo tuple (provider, modello) dal DB
+            conn = cls._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT provider, modello
+                FROM Chat
+                ORDER BY provider, modello;
+            """)
+            chat_rows = cursor.fetchall()
+            conn.close()
+        except Exception as e:
+            raise e
+        else:
+            return chat_rows
+
 
     @classmethod
     def _is_port_in_use(cls, host: str, port: int) -> bool:
