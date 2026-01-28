@@ -87,7 +87,7 @@ class Provider(ABC):
         return self._prefisso_token
     
     def ripulisci_chat(self, modello):
-        if modello:
+        if modello in self._cronologia_messaggi:
             self._cronologia_messaggi[modello].clear()
     
     def set_modello_scelto(self, modello):
@@ -231,16 +231,21 @@ class Provider(ABC):
         return Messaggio(testo=testo, ruolo=ruolo, allegati=allegati, timestamp=timestamp, id=f"{self._nome}-{self._modello_scelto}-{timestamp}")
         
     """ 
-    Ritorna la lista di messaggi nella cronologia del modello scelto in formato "Messaggio".
-    self._cronologia_messaggi[self._modello_scelto] è una lista di tuple (m0, m1) in cui m0 
-    è un messaggio in formato Langchain (quindi un'istanza di HumanMessage, AIMEssage,...) mentre
+    Ritorna la lista di messaggi nella cronologia di un certo modello (se non specificato viene preso il modello_scelto)
+    in formato "Messaggio". Self._cronologia_messaggi[self._modello_scelto] è una lista di tuple (m0, m1) in cui m0 
+    è un messaggio in formato Langchain (quindi un'istanza di HumanMessage, AIMessage,...) mentre
     m1 è un'istanza della classe Messaggio, usata per mostrare il contenuto sulla GUI e per i salvataggi 
     sul DB. Questo metodo ritorna una lista di m1.
     """
-    def get_cronologia_messaggi(self) -> List[Messaggio]: 
-        if not self._modello_scelto:
+    def get_cronologia_messaggi(self, modello=None) -> List[Messaggio]: 
+        modello = modello or self._modello_scelto
+        if not modello or not self._cronologia_messaggi or not self._cronologia_messaggi[modello]:
             return []
-        return [tupla[1] for tupla in self._cronologia_messaggi[self._modello_scelto]]
+        return [tupla[1] for tupla in self._cronologia_messaggi[modello]]
+    
+    # ritorna la lista dei modelli che hanno almeno un messaggio in chat
+    def get_lista_modelli_con_chat(self) -> List[Messaggio]: 
+        return [modello for modello in self._cronologia_messaggi if self._cronologia_messaggi[modello]]
         
     @abstractmethod
     def lista_modelli_rag(self):

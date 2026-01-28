@@ -259,6 +259,26 @@ def crea_sidebar(providers: Dict[str, Provider]):
             on_change=sincronizza_sessione, args=(sysmsg_key,)
         )
         
+        # CHAT RECENTI            
+        def on_ripristina_chat():
+            val = st.session_state["ripristina_chat"]
+            if val:
+                prov, mod = val.split(" | ")
+                # Aggiorna la chiave per la TabBar, forzando la ricreazione del widget e l'aggiornamento del provider corretto
+                if st.session_state.get(f"{st.session_state['tabbar_key']}"):
+                    del st.session_state[f"{st.session_state['tabbar_key']}"]                    
+                st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"            
+                # Aggiorna la selezione del modello per quel provider                    "
+                key_mod = f"modello_{prov}"
+                st.session_state[key_mod] = mod
+        
+        # TODO: la lista deve venire dai provider caricati in memoria, non dal disco
+        chat_recenti = ["",] + [f"{prov} | {mod}" for prov, mod in StoricoChat.ritorna_chat_recenti()]
+        if len(chat_recenti)>1:
+            st.selectbox("📂 Riapri chat recente:", options=chat_recenti, key="ripristina_chat", on_change=on_ripristina_chat)
+        else:
+            st.caption("📂 Nessuna chat recente")
+            
         # Sezione RAG
         with st.expander("🔎 RAG", expanded=bool(st.session_state[provider_scelto][rag_enabled_key])):
             # Toggle RAG
@@ -296,92 +316,135 @@ def crea_sidebar(providers: Dict[str, Provider]):
         # ──────────────────────────────────────────────────────────────────────────────
         # Sezione Chat
         # ──────────────────────────────────────────────────────────────────────────────
-        with st.expander("💬 Chat", expanded=False):
-            # CHAT RECENTI            
-            def on_ripristina_chat():
-                val = st.session_state["ripristina_chat"]
-                if val:
-                    prov, mod = val.split(" | ")
-                    # Aggiorna la chiave per la TabBar, forzando la ricreazione del widget e l'aggiornamento del provider corretto
-                    if st.session_state.get(f"{st.session_state['tabbar_key']}"):
-                        del st.session_state[f"{st.session_state['tabbar_key']}"]                    
-                    st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"            
-                    # Aggiorna la selezione del modello per quel provider                    "
-                    key_mod = f"modello_{prov}"
-                    st.session_state[key_mod] = mod
-                    
-            chat_recenti = ["",] + [f"{prov} | {mod}" for prov, mod in StoricoChat.ritorna_chat_recenti()]
-            if chat_recenti:
-                st.selectbox("📂 Riapri chat recente:", options=chat_recenti, key="ripristina_chat", on_change=on_ripristina_chat)
+        with st.expander("💬 Gestione chat", expanded=False):                
+            colonna1, colonna2, colonna3 = st.columns(3, border=True)
+            with colonna1:# PULSANTI DI SALVATAGGIO CHAT
+                with st.popover("💾 Salva..."):
+                    col1, col2 = st.columns(2, border=True)
+                    # Pulsante: Salva chat corrente
+                    with col1:
+                        st.subheader("Salva chat corrente")
+                        try:
+                            salva=st.button("💾 Salva chat corrente", use_container_width=True)
+                            st.caption("ℹ️ Salva su disco il contenuto della chat attualmente visualizzata")
+                            if salva:
+                                cronologia = provider.get_cronologia_messaggi(modello=modello_scelto)
+                                StoricoChat.salva_chat(provider_scelto, modello_scelto, cronologia)
+                                st.success("Chat salvata nel DB", icon="✅")
+                        except Exception as e:
+                            st.exception(e)
+                    with col2:
+                        st.subheader("Salva tutte le chat")
+                        # Pulsante: Salva tutte le chat
+                        salva=st.button("🗃️ Salva tutte le chat")
+                        st.caption("ℹ️ Salva su disco tutte le chat in memoria")
+                        if salva:
+                            try:
+                                with st.empty():
+                                    with st.status(label="Salvataggio in corso...", expanded=True):
+                                        for nome_p, prov in providers.items():
+                                            modelli = prov.get_lista_modelli_con_chat()
+                                            for modello in modelli:
+                                                st.write(f"Provider: {nome_p}, modello: {modello}...")
+                                                StoricoChat.salva_chat(nome_p, modello, prov.get_cronologia_messaggi(modello=modello))
+                                    st.success("Tutte le chat salvate", icon="✅")
+                            except Exception as e:
+                                st.exception(e)
+            with colonna2: # PULSANTI DI IMPORT/EXPORT DB
+                with st.popover("🔁 Importa/esporta...", use_container_width=True):    
+                    col1, col2 = st.columns(2, border=True)
+                    with col1:
+                        st.subheader("Esporta")
+                        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # genera la stringa di data/ora
+                        filename = f"storico_{ts}.json"
+                        try:
+                            json_data = StoricoChat.esporta_json()
+                            st.download_button(
+                                label="⬇️ Esporta tutte le chat",
+                                data=json_data,
+                                file_name=filename,
+                                mime="application/json"
+                            )
+                            st.caption("ℹ️ Scarica il contenuto del DB delle chat in formato JSON")
+                        except Exception as e:
+                            st.exception(e)
+                    with col2:
+                        st.subheader("Importa")
+                        # Importa DB JSON
+                        try:
+                            json_file = st.file_uploader("📥 Seleziona JSON da importare", type=["json"])
+                            if json_file and st.button("📥 Importa chat"):
+                                text = json_file.read().decode("utf-8")
+                                StoricoChat.importa_json(text)
+                                st.success("Chat importate", icon="✅")
+                        except Exception as e:
+                            st.exception(e)
+            with colonna3:# PULSANTI DI ELIMINAZIONE CHAT
+                with st.popover("🗑️ Elimina...", use_container_width=True):
+                    col1, col2, col3, col4 = st.columns(4, border=True)
+                    with col1: # cancella la cronologia corrente in ram
+                        st.subheader("Ripulisci chat")
+                        ripulisci=st.button("🧹 Ripulisci chat")
+                        st.caption("ℹ️ Svuota il cotenuto della chat visualizzata. I dati non salvati andranno persi.")
+                        if ripulisci:
+                            try:
+                                provider.ripulisci_chat(modello_scelto)
+                                st.success("Chat ripulita", icon="✅")
+                            except Exception as e:
+                                st.exception(e)
+                    with col2: # cancella tutte le chat in ram
+                        st.subheader("Ripulisci tutte le chat")
+                        svuota=st.button("🚮 Ripulisci tutte le chat")
+                        st.caption("ℹ️ Svuota tutte le chat visualizzate. I dati non salvati andranno persi.")
+                        if svuota:
+                            try:
+                                with st.empty():
+                                    with st.status(label="Svuotamento in corso...", expanded=True):
+                                        for nome_p, prov in providers.items():
+                                            modello = prov.get_modello_scelto()
+                                            if modello:
+                                                st.write(f"Provider: {nome_p}, modello: {modello}...")
+                                                provider.ripulisci_chat(modello)
+                                    st.success("Svuotate tutte le chat", icon="✅")
+                            except Exception as e:
+                                st.exception(e)
+                    with col3:# Cancella chat dal disco
+                        st.subheader("Cancella chat dal disco")
+                        cancella=st.button("🔥 Cancella chat")
+                        st.caption("ℹ️ La chat visualizzata viene cancellata dal disco. È possibile continuare a lavorare con quella visualizzata.")
+                        if cancella:
+                            try:
+                                StoricoChat.cancella_chat(provider_scelto, modello_scelto)
+                                st.success("Chat cancellata dal disco", icon="✅")      
+                            except Exception as e:
+                                st.exception(e)
+                    with col4: # Cancella tutto il DB
+                        st.subheader("Elimina tutto il DB")
+                        elimina=st.button("💥 Elimina tutto il DB")
+                        st.caption("ℹ️ Il database con tutte le chat salvate viene eliminato definitivamente dal disco. Tutti i dati non esportati andranno persi.")
+                        if elimina:
+                            try:
+                                StoricoChat.cancella_tutto()
+                                st.success("DB eliminato", icon="✅")
+                            except Exception as e:
+                                st.exception
+            # Gestisci cronologie (placeholder)
+            if StoricoChat.is_sqlite_web_active():
+                url = StoricoChat.get_sqlite_web_url()
+                st.markdown(
+                    f'<a href="{url}" target="_blank">'
+                    '<button style="width:100%; padding:8px; font-size:1rem;">'
+                    '🔍 Gestione avanzata DB'
+                    '</button></a>',
+                    unsafe_allow_html=True
+                )
             else:
-                st.caption("📂 Nessuna chat recente")
-                
-            # PULSANTI DI SALVATAGGIO CHAT
-            with st.container(border=True):
-                with st.popover("💾 Salva chat..."):    
-                    # Pulsante: Salva cronologia corrente
-                    if st.button("💾 Salva chat corrente"):
-                        cronologia = provider.get_cronologia_messaggi()
-                        StoricoChat.salva_chat(provider_scelto, modello_scelto, cronologia)
-                        st.toast("Chat salvata nel DB", icon="💾")
-                    # Pulsante: Salva tutte le cronologie
-                    if st.button("🗃️ Salva tutte le chat"):
-                        for nome_p, prov in providers.items():
-                            mod_corr = prov.get_modello_scelto()
-                            if mod_corr:
-                                StoricoChat.salva_chat(nome_p, mod_corr, prov.get_cronologia_messaggi())
-                        st.toast("Tutte le chat salvate", icon="🗃️")
-                with st.popover("🔁 Importa/esporta..."):    
-                    
-                    # PULSANTI DI IMPORT/EXPORT DB
-                    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # genera la stringa di data/ora
-                    filename = f"storico_{ts}.json"
-                    json_data = StoricoChat.esporta_json()
-                    st.download_button(
-                        label="⬇️ Export DB in Json",
-                        data=json_data,
-                        file_name=filename,
-                        mime="application/json"
-                    )
-                    # Importa DB JSON
-                    json_file = st.file_uploader("📥 Seleziona JSON da importare", type=["json"])
-                    if json_file and st.button("📥 Importa cronologie"):
-                        text = json_file.read().decode("utf-8")
-                        StoricoChat.importa_json(text)
-                        st.toast("Importazione completata!", icon="✔️")
-                
-                # PULSANTI DI ELIMINAZIONE CHAT
-                with st.popover("🚮 Elimina chat..."):    
-                    # cancella la cronologia corrente in ram
-                    if st.button("🧹 Ripulisci chat"):
-                        provider.ripulisci_chat(modello_scelto)
-                        st.toast("Chat ripulita", icon="🧹")
-                    # Cancella cronologia dal disco
-                    if st.button("🗑️ Cancella chat dal disco"):
-                        StoricoChat.cancella_chat(provider_scelto, modello_scelto)
-                        st.toast("Chat cancellata", icon="🗑️")      
-                    # Cancella tutto il DB
-                    if st.button("🔥 Cancella tutto il DB"):
-                        StoricoChat.cancella_tutto()
-                        st.toast("DB cancellato", icon="🔥")
-
-                # Gestisci cronologie (placeholder)
-                if StoricoChat.is_sqlite_web_active():
-                    url = StoricoChat.get_sqlite_web_url()
-                    st.markdown(
-                        f'<a href="{url}" target="_blank">'
-                        '<button style="width:100%; padding:8px; font-size:1rem;">'
-                        '🔍 Gestione avanzata DB'
-                        '</button></a>',
-                        unsafe_allow_html=True
-                    )
-                else:
-                    if st.button("🔍 Avvia e apri la gestione avanzata del DB"):
-                        started = StoricoChat.start_sqlite_web_server()
-                        if started:
-                            st.toast("Server DB avviato", icon="🌐")
-                        else:
-                            st.error("Avvio sqlite‑web fallito")
+                if st.button("🔍 Avvia e apri la gestione avanzata del DB"):
+                    started = StoricoChat.start_sqlite_web_server()
+                    if started:
+                        st.toast("Server DB avviato", icon="🌐")
+                    else:
+                        st.error("Avvio sqlite‑web fallito")
 
         # Salva configurazione (tutti i provider)
         st.button("Salva configurazione", key="salva", on_click=salva_configurazione, args=[providers])
@@ -391,7 +454,7 @@ def crea_sidebar(providers: Dict[str, Provider]):
             provider.set_rag(attivo=rag_abilitato, topk=topk, modello=modello_rag, modalita_ricerca=modalita_ricerca)
         except Exception as e:
             st.toast(f"Errore nell'impostazione dei parametri: {e}", icon="⛔")
-    st.sidebar.json(st.session_state)
+    #st.sidebar.json(st.session_state)
     
     # ---- Render della finestra modale ----
     if st.session_state.get("vs_dialog_global_open", False):
