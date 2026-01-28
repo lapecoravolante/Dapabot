@@ -183,10 +183,6 @@ def crea_sidebar(providers: Dict[str, Provider]):
     st.logo(image="src/img/logo.png", size="large")
     
     with st.sidebar:
-
-        # ──────────────────────────
-        # INIZIO COSTRUZIONE SIDEBAR 
-        #───────────────────────────
         
         """
             Di seguito viene creata una tabbar con un widget personalizzato (stx.tab_bar, non standard di streamlit).
@@ -227,7 +223,12 @@ def crea_sidebar(providers: Dict[str, Provider]):
         modelli_rag = list(provider.lista_modelli_rag())
         modalities  = list(Rag.AVAILABLE_SEARCH_MODALITIES)
 
-        # --- Widget: inizializzazione robusta ---
+        """
+            I widget non renderizzati vengono distrutti per risparmiare e quando vengono ricreati non riprendono il loro stato da st.session_state.
+            In questo caso facio il backup dei valori di st.session_state in st.session_state[provider_scelto] e li ripristino dentro la funzione 
+            inizializza(). Questo metodo è descritto anche nella documentazione ufficiale: 
+            https://docs.streamlit.io/develop/concepts/architecture/widget-behavior#widgets-do-not-persist-when-not-continually-rendered
+        """
         def sincronizza_sessione(chiave_widget):
             # copia il valore dalla sessione nel dizionario annidato di ogni provider
             st.session_state[provider_scelto][chiave_widget] = st.session_state[chiave_widget]
@@ -272,8 +273,10 @@ def crea_sidebar(providers: Dict[str, Provider]):
                 key_mod = f"modello_{prov}"
                 st.session_state[key_mod] = mod
         
-        # TODO: la lista deve venire dai provider caricati in memoria, non dal disco
-        chat_recenti = ["",] + [f"{prov} | {mod}" for prov, mod in StoricoChat.ritorna_chat_recenti()]
+        chat_recenti = ["",]
+        for nome_prov, prov in providers.items():
+            modelli = prov.get_lista_modelli_con_chat()
+            chat_recenti.extend([f"{nome_prov} | {modello}" for modello in modelli])
         if len(chat_recenti)>1:
             st.selectbox("📂 Riapri chat recente:", options=chat_recenti, key="ripristina_chat", on_change=on_ripristina_chat)
         else:
