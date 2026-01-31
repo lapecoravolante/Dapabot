@@ -41,6 +41,11 @@ class Provider(ABC):
                              upload_dir=p[Configurazione.RAG_KEY]["directory_allegati"],
                              modalita_ricerca=p[Configurazione.RAG_KEY]["modalita_ricerca"])
 
+    """
+        Ritorna una lista di tuple (m0, m1) in cui m0 è un messaggio in formato Langchain (quindi un'istanza 
+        di HumanMessage, AIMessage,...) mentre m1 è un'istanza della classe Messaggio, usata per mostrare 
+        il contenuto sulla GUI e per i salvataggi sul DB
+    """
     def _carica_cronologia_da_disco(self, modello) -> List[Tuple]:
         # ricostruisco la cronologia prendendo i messaggi dal disco e ricostruendo l'equivalente messaggio in formato Langchain
         messaggi_su_disco=StoricoChat.carica_cronologia(self._nome, modello)
@@ -64,7 +69,7 @@ class Provider(ABC):
                             blocchi.append({"type": "file", "mime_type": mime_type, "base64": contenuto, "filename": filename})
                     if m.get_ruolo()=="user":
                         tuple_da_ritornare.append((HumanMessage(content_blocks=blocchi), m))
-                    else:
+                    else: # m.get_ruolo()=="ai" o "assistant"
                         tuple_da_ritornare.append((AIMessage(content_blocks=blocchi), m))
         return tuple_da_ritornare
 
@@ -213,13 +218,14 @@ class Provider(ABC):
         except Exception as errore:
             raise Exception(f"Errore nell'invio del messaggio: {errore}")
             
+    # converte un messaggio di Langchain (AIMessage, SystemMessage, HumanMessage,...) in un'istanza della classe Messaggio
     def _converti_messaggio(self, m):
         ruolo=m.type
         testo=""
         allegati: list[Allegato]=list()
+        timestamp=datetime.now()
         for blocco in m.content_blocks:
             tipo = blocco["type"]
-            timestamp=datetime.now()
             # aggiunge i blocchi di tipo testo al testo principale del messaggio
             if tipo == "text": 
                 testo += blocco["text"] + "\n"
@@ -228,7 +234,7 @@ class Provider(ABC):
                 contenuto = base64.b64decode(blocco["base64"]) if "base64" in blocco else blocco.get("text", "")
                 mime_type = blocco.get("mime_type", tipo)
                 allegati.append(Allegato(tipo=tipo, contenuto=contenuto, mime_type=mime_type))    
-        return Messaggio(testo=testo, ruolo=ruolo, allegati=allegati, timestamp=timestamp, id=f"{self._nome}-{self._modello_scelto}-{timestamp}")
+        return Messaggio(testo=testo, ruolo=ruolo, allegati=allegati, timestamp=timestamp, id=f"{self._nome}-{self._modello_scelto}")
         
     """ 
     Ritorna la lista di messaggi nella cronologia di un certo modello (se non specificato viene preso il modello_scelto)
@@ -242,6 +248,21 @@ class Provider(ABC):
         if not modello or not self._cronologia_messaggi or not self._cronologia_messaggi[modello]:
             return []
         return [tupla[1] for tupla in self._cronologia_messaggi[modello]]
+    
+    # questo metodo va sul DB, carica i messaggi salvati e li aggiunge alla cronologia attuale
+    def carica_chat_da_db(self, modello=None):
+        modello=modello or self._modello_scelto
+        # recupera i messaggi dal DB
+        messaggi_su_disco=self._carica_cronologia_da_disco(modello=modello)
+        # fonde i messaggi provenienti dal db con quelli già presenti in memoria.
+        # Per evitare doppioni, confronta i timestamp dei messaggi in memoria con
+        # quello del messaggio più recente su DB. Solo i messaggi successivi a quest'ultimo
+        # saranno aggiunti alla cronologia della chat
+        ultimo_messaggio_su_disco=[]
+        if messaggi_su_disco:
+            _, ultimo_messaggio_su_disco=messaggi_su_disco[-1]
+        messaggi_da_aggiungere=[(m0,m1) for m0,m1 in self._cronologia_messaggi[modello] if m1.timestamp() > ultimo_messaggio_su_disco.timestamp()]
+        self._cronologia_messaggi[modello]=messaggi_su_disco+messaggi_da_aggiungere
     
     # ritorna la lista dei modelli che hanno almeno un messaggio in chat
     def get_lista_modelli_con_chat(self) -> List[Messaggio]: 

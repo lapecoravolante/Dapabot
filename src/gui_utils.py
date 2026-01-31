@@ -235,7 +235,7 @@ def crea_sidebar(providers: Dict[str, Provider]):
             
         # Text input: API key
         api_key = st.text_input("🗝️ API Key", type="password", key=apikey_key, placeholder="Inserisci la tua API key",
-            value=st.session_state[provider_scelto][apikey_key],            
+            value=st.session_state[provider_scelto][apikey_key],
             # la funzione lambda prende il valore inserito nel text_input e lo copia dentro st.session_state.provider_scelto.apikey_key
             on_change=sincronizza_sessione, args=(apikey_key,)
         )
@@ -261,26 +261,35 @@ def crea_sidebar(providers: Dict[str, Provider]):
         )
         
         # CHAT RECENTI            
-        def on_ripristina_chat():
-            val = st.session_state["ripristina_chat"]
-            if val:
-                prov, mod = val.split(" | ")
-                # Aggiorna la chiave per la TabBar, forzando la ricreazione del widget e l'aggiornamento del provider corretto
-                if st.session_state.get(f"{st.session_state['tabbar_key']}"):
-                    del st.session_state[f"{st.session_state['tabbar_key']}"]                    
-                st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"            
-                # Aggiorna la selezione del modello per quel provider                    "
-                key_mod = f"modello_{prov}"
-                st.session_state[key_mod] = mod
-        
-        chat_recenti = ["",]
-        for nome_prov, prov in providers.items():
-            modelli = prov.get_lista_modelli_con_chat()
-            chat_recenti.extend([f"{nome_prov} | {modello}" for modello in modelli])
-        if len(chat_recenti)>1:
-            st.selectbox("📂 Riapri chat recente:", options=chat_recenti, key="ripristina_chat", on_change=on_ripristina_chat)
-        else:
-            st.caption("📂 Nessuna chat recente")
+        with st.container(border=True):            
+            def on_ripristina_chat():
+                val = st.session_state["ripristina_chat"]
+                if val:
+                    prov, mod = val.split(" | ")
+                    # Aggiorna la chiave per la TabBar, forzando la ricreazione del widget e l'aggiornamento del provider corretto
+                    if st.session_state.get(f"{st.session_state['tabbar_key']}"):
+                        del st.session_state[f"{st.session_state['tabbar_key']}"]                    
+                    st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"            
+                    # Aggiorna la selezione del modello per quel provider                    "
+                    st.session_state[f"modello_{prov}"] = mod
+            
+            chat_recenti = ["",]
+            for nome_prov, prov in providers.items():
+                modelli = prov.get_lista_modelli_con_chat()
+                chat_recenti.extend([f"{nome_prov} | {modello}" for modello in modelli])
+            if "chat_db_key" in st.session_state and st.session_state["chat_db_key"]:
+                chat_su_disco=set([f"{prov} | {mod}" for prov, mod in StoricoChat.ritorna_chat_recenti()])
+                chat_recenti=sorted(list(chat_su_disco.union(set(chat_recenti))))
+            if len(chat_recenti)>1:
+                st.selectbox("📂 Riapri chat recente:", options=chat_recenti, key="ripristina_chat", on_change=on_ripristina_chat)
+            else:
+                st.caption("📂 Nessuna chat recente")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.checkbox("Mostra chat su DB", key="chat_db_key")
+            with col2:
+                if st.checkbox("Autocaricamento dal DB", key="autoload_chat_db"):
+                    provider.carica_chat_da_db()
             
         # Sezione RAG
         with st.expander("🔎 RAG", expanded=bool(st.session_state[provider_scelto][rag_enabled_key])):

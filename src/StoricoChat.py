@@ -1,9 +1,5 @@
-import sqlite3
-import os
-import json
-import subprocess
-import socket
-import base64
+import sqlite3, os, json, subprocess, socket, base64
+from datetime import datetime
 from typing import List
 from uuid import uuid4
 from src.Messaggio import Messaggio
@@ -42,9 +38,11 @@ class StoricoChat:
         """)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS Messaggio (
-            id TEXT PRIMARY KEY,
+            id TEXT NOT NULL,
             ruolo TEXT NOT NULL,
-            contenuto TEXT NOT NULL
+            contenuto TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            PRIMARY KEY (id, timestamp)
         );
         """)
         cursor.execute("""
@@ -61,19 +59,21 @@ class StoricoChat:
         CREATE TABLE IF NOT EXISTS MessaggiInChat (
             id_chat INTEGER,
             messaggio_id TEXT,
-            FOREIGN KEY(id_chat) REFERENCES Chat(id) ON DELETE CASCADE,
-            FOREIGN KEY(messaggio_id) REFERENCES Messaggio(id) ON DELETE CASCADE,
-            PRIMARY KEY(id_chat, messaggio_id)
+            messaggio_timestamp TEXT,
+            PRIMARY KEY (id_chat, messaggio_id, messaggio_timestamp),
+            FOREIGN KEY (id_chat) REFERENCES Chat(id) ON DELETE CASCADE,
+            FOREIGN KEY (messaggio_id, messaggio_timestamp) REFERENCES Messaggio(id, timestamp) ON DELETE CASCADE
         );
         """)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS Allegato (
             id TEXT PRIMARY KEY,
             messaggio_id TEXT NOT NULL,
+            messaggio_timestamp TEXT NOT NULL,
             tipo TEXT NOT NULL,
             mime_type TEXT,
             base64 TEXT,
-            FOREIGN KEY(messaggio_id) REFERENCES Messaggio(id) ON DELETE CASCADE
+            FOREIGN KEY(messaggio_id, messaggio_timestamp) REFERENCES Messaggio(id, timestamp) ON DELETE CASCADE
         );
         """)
 
@@ -131,16 +131,19 @@ class StoricoChat:
             msg_id = mess.get_id()
             ruolo = mess.get_ruolo()
             testo = mess.get_testo()
+            timestamp=mess.timestamp().isoformat()
 
             cursor.execute("""
-            INSERT OR IGNORE INTO Messaggio (id, ruolo, contenuto)
+            INSERT OR IGNORE INTO Messaggio (id, ruolo, contenuto, timestamp)
+            VALUES (?, ?, ?, ?);
+            """, (msg_id, ruolo, testo, timestamp))
+
+            cursor.execute("""
+            INSERT OR IGNORE INTO MessaggiInChat
+            (id_chat, messaggio_id, messaggio_timestamp)
             VALUES (?, ?, ?);
-            """, (msg_id, ruolo, testo))
+            """, (chat_id, msg_id, timestamp))
 
-            cursor.execute("""
-            INSERT OR IGNORE INTO MessaggiInChat (id_chat, messaggio_id)
-            VALUES (?, ?);
-            """, (chat_id, msg_id))
 
             # salva gli allegati in Base64
             for allegato in mess.get_allegati():
@@ -148,9 +151,9 @@ class StoricoChat:
                 b64_str = cls._encode_allegato(allegato)
                 cursor.execute("""
                 INSERT OR IGNORE INTO Allegato
-                (id, messaggio_id, tipo, mime_type, base64)
-                VALUES (?, ?, ?, ?, ?);
-                """, (allegato_uuid, msg_id, allegato.tipo, allegato.mime_type, b64_str))
+                (id, messaggio_id, messaggio_timestamp, tipo, mime_type, base64)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """, (allegato_uuid, msg_id, timestamp, allegato.tipo, allegato.mime_type, b64_str))
 
         conn.commit()
         conn.close()
@@ -173,11 +176,13 @@ class StoricoChat:
         chat_id = row["id"]
 
         cursor.execute("""
-        SELECT m.id, m.ruolo, m.contenuto
+        SELECT m.id, m.ruolo, m.contenuto, m.timestamp
         FROM MessaggiInChat mic
-        JOIN Messaggio m ON mic.messaggio_id = m.id
-        WHERE mic.id_chat=?
-        ORDER BY m.id;
+        JOIN Messaggio m
+        ON mic.messaggio_id = m.id
+        AND mic.messaggio_timestamp = m.timestamp
+        WHERE mic.id_chat = ?
+        ORDER BY m.timestamp;
         """, (chat_id,))
 
         messaggi = []
@@ -185,19 +190,21 @@ class StoricoChat:
             msg_id = r["id"]
             testo = r["contenuto"]
             ruolo = r["ruolo"]
+            timestamp=datetime.fromisoformat(r["timestamp"])
 
             # carica gli allegati salvati in Base64
             cursor.execute("""
             SELECT tipo, mime_type, base64 FROM Allegato
-            WHERE messaggio_id=?;
-            """, (msg_id,))
+            WHERE messaggio_id=? and messaggio_timestamp=?;
+            """, (msg_id, timestamp))
             allegati = []
             for a in cursor.fetchall():
                 contenuto = base64.b64decode(a["base64"])
+                tipo=a["tipo"]
+                mime_type=a["mime_type"]
                 # Decodifico il contenuto dell'allegato
-                allegati.append(Allegato(tipo=a["tipo"], contenuto=contenuto, mime_type=a["mime_type"]))
-            messaggi.append(Messaggio(testo=testo, ruolo=ruolo, allegati=allegati, id=msg_id))
-
+                allegati.append(Allegato(tipo=tipo, contenuto=contenuto, mime_type=mime_type))
+            messaggi.append(Messaggio(testo=testo, ruolo=ruolo, allegati=allegati, timestamp=timestamp, id=msg_id))
         conn.close()
         return messaggi
 
@@ -261,9 +268,9 @@ class StoricoChat:
 
         for msg in data.get("Messaggio", []):
             cursor.execute("""
-            INSERT OR IGNORE INTO Messaggio (id, ruolo, contenuto)
-            VALUES (?, ?, ?);
-            """, (msg["id"], msg["ruolo"], msg["contenuto"]))
+            INSERT OR IGNORE INTO Messaggio (id, ruolo, contenuto, timestamp)
+            VALUES (?, ?, ?, ?);
+            """, (msg["id"], msg["ruolo"], msg["contenuto"], msg["timestamp"]))
 
         for c in data.get("Chat", []):
             cursor.execute("""
@@ -273,9 +280,9 @@ class StoricoChat:
 
         for mic in data.get("MessaggiInChat", []):
             cursor.execute("""
-            INSERT OR IGNORE INTO MessaggiInChat (id_chat, messaggio_id)
-            VALUES (?, ?);
-            """, (mic["id_chat"], mic["messaggio_id"]))
+            INSERT OR IGNORE INTO MessaggiInChat (id_chat, messaggio_id, messaggio_timestamp)
+            VALUES (?, ?, ?);
+            """, (mic["id_chat"], mic["messaggio_id"], mic["messaggio_timestamp"]))
 
         for al in data.get("Allegato", []):
             cursor.execute("""

@@ -42,10 +42,7 @@ class Messaggio():
         return self._timestamp
     
     def set_timestamp(self, timestamp=""):
-        if not timestamp:
-            self._timestamp=datetime.now()
-        else:
-            self._timestamp=timestamp
+        self._timestamp=timestamp or datetime.now()
     
     def set_testo(self, testo=""):
         self._testo=testo
