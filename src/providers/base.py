@@ -259,10 +259,12 @@ class Provider(ABC):
         # Per evitare doppioni, confronta i timestamp dei messaggi in memoria con
         # quello del messaggio più recente su DB. Solo i messaggi successivi a quest'ultimo
         # saranno aggiunti alla cronologia della chat
-        ultimo_messaggio_su_disco=[]
-        if messaggi_su_disco:
+        messaggi_da_aggiungere=[]
+        if messaggi_su_disco: # se ci sono messaggi su disco, li unisco a quelli in memoria
             _, ultimo_messaggio_su_disco=messaggi_su_disco[-1]
-        messaggi_da_aggiungere=[(m0,m1) for m0,m1 in self._cronologia_messaggi[modello] if m1.timestamp() > ultimo_messaggio_su_disco.timestamp()]
+            messaggi_da_aggiungere=[(m0,m1) for m0,m1 in self._cronologia_messaggi[modello] if m1.timestamp() > ultimo_messaggio_su_disco.timestamp()]
+        else: # altrimenti la chat sarà composta solo dai messaggi già in memoria
+            messaggi_da_aggiungere=self._cronologia_messaggi[modello]
         self._cronologia_messaggi[modello]=messaggi_su_disco+messaggi_da_aggiungere
     
     # ritorna la lista dei modelli che hanno almeno un messaggio in chat

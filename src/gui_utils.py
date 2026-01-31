@@ -286,9 +286,9 @@ def crea_sidebar(providers: Dict[str, Provider]):
                 st.caption("📂 Nessuna chat recente")
             col1, col2 = st.columns(2)
             with col1:
-                st.checkbox("Mostra chat su DB", key="chat_db_key")
+                st.checkbox("Mostra chat su DB", key="chat_db_key", help="Se abilitato mostra le chat memorizzate su disco nella lista qui sopra", label_visibility="visible")
             with col2:
-                if st.checkbox("Autocaricamento dal DB", key="autoload_chat_db"):
+                if st.checkbox("Autocaricamento dal DB", key="autoload_chat_db", help="Se abilitato carica automaticamente la cronologia delle chat dal disco (se presenti)", label_visibility="visible"):
                     provider.carica_chat_da_db()
             
         # Sezione RAG
