@@ -72,7 +72,8 @@ class StoricoChat:
             messaggio_timestamp TEXT NOT NULL,
             tipo TEXT NOT NULL,
             mime_type TEXT,
-            base64 TEXT,
+            contenuto TEXT,
+            filename TEXT,
             FOREIGN KEY(messaggio_id, messaggio_timestamp) REFERENCES Messaggio(id, timestamp) ON DELETE CASCADE
         );
         """)
@@ -88,11 +89,8 @@ class StoricoChat:
         - se è plain/text ritorna direttamente la stringa
         """
         contenuto = allegato.contenuto
-        if isinstance(contenuto, (bytes, bytearray)):
-            return base64.b64encode(contenuto).decode("utf-8")
-        else:
-            # è presumibilmente testo
-            return str(contenuto)
+        tipo=allegato.tipo
+        return contenuto if tipo.startswith("text")  else base64.b64encode(contenuto).decode("utf-8") 
 
     @classmethod
     def salva_chat(cls, provider: str, modello: str, cronologia: List[Messaggio]):
@@ -145,15 +143,16 @@ class StoricoChat:
             """, (chat_id, msg_id, timestamp))
 
 
-            # salva gli allegati in Base64
+            # salva gli allegati codificandoli in Base64 (se serve)
             for allegato in mess.get_allegati():
                 allegato_uuid = f"{msg_id}-{uuid4().hex}"
-                b64_str = cls._encode_allegato(allegato)
+                contenuto = cls._encode_allegato(allegato)
+                filename=allegato.filename
                 cursor.execute("""
                 INSERT OR IGNORE INTO Allegato
-                (id, messaggio_id, messaggio_timestamp, tipo, mime_type, base64)
-                VALUES (?, ?, ?, ?, ?, ?);
-                """, (allegato_uuid, msg_id, timestamp, allegato.tipo, allegato.mime_type, b64_str))
+                (id, messaggio_id, messaggio_timestamp, tipo, mime_type, contenuto, filename)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """, (allegato_uuid, msg_id, timestamp, allegato.tipo, allegato.mime_type, contenuto, filename))
 
         conn.commit()
         conn.close()
@@ -190,20 +189,21 @@ class StoricoChat:
             msg_id = r["id"]
             testo = r["contenuto"]
             ruolo = r["ruolo"]
-            timestamp=datetime.fromisoformat(r["timestamp"])
+            timestamp=r["timestamp"]
 
             # carica gli allegati salvati in Base64
             cursor.execute("""
-            SELECT tipo, mime_type, base64 FROM Allegato
+            SELECT tipo, mime_type, contenuto, filename FROM Allegato
             WHERE messaggio_id=? and messaggio_timestamp=?;
             """, (msg_id, timestamp))
             allegati = []
             for a in cursor.fetchall():
-                contenuto = base64.b64decode(a["base64"])
                 tipo=a["tipo"]
+                contenuto = a["contenuto"] if tipo.startswith("text") else base64.b64decode(a["contenuto"])
                 mime_type=a["mime_type"]
+                filename=a["filename"]
                 # Decodifico il contenuto dell'allegato
-                allegati.append(Allegato(tipo=tipo, contenuto=contenuto, mime_type=mime_type))
+                allegati.append(Allegato(tipo=tipo, contenuto=contenuto, mime_type=mime_type, filename=filename))
             messaggi.append(Messaggio(testo=testo, ruolo=ruolo, allegati=allegati, timestamp=timestamp, id=msg_id))
         conn.close()
         return messaggi
@@ -287,9 +287,9 @@ class StoricoChat:
         for al in data.get("Allegato", []):
             cursor.execute("""
             INSERT OR IGNORE INTO Allegato
-            (id, messaggio_id, tipo, mime_type, base64)
+            (id, messaggio_id, tipo, mime_type, contenuto)
             VALUES (?, ?, ?, ?, ?);
-            """, (al["id"], al["messaggio_id"], al["tipo"], al["mime_type"], al["base64"]))
+            """, (al["id"], al["messaggio_id"], al["tipo"], al["mime_type"], al["contenuto"]))
 
         conn.commit()
         conn.close()

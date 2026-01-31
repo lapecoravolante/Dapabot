@@ -50,7 +50,7 @@ class Provider(ABC):
         # ricostruisco la cronologia prendendo i messaggi dal disco e ricostruendo l'equivalente messaggio in formato Langchain
         messaggi_su_disco=StoricoChat.carica_cronologia(self._nome, modello)
         tuple_da_ritornare=[]
-        for m in messaggi_su_disco:
+        for m in messaggi_su_disco:            
             match m.get_ruolo():
                 case "system":
                     tuple_da_ritornare.append((SystemMessage(content=m.get_testo()), m))
@@ -61,6 +61,7 @@ class Provider(ABC):
                         tipo      = allegato.tipo
                         mime_type = allegato.mime_type
                         filename  = allegato.filename
+                        print(f"Carico l'allegato: tipo: {tipo}, mime:{mime_type}, contenuto: {contenuto[:10]}")
                         if tipo in ("image", "video", "audio"):
                             blocchi.append({"type": tipo, "mime_type": mime_type, "base64": contenuto})
                         elif mime_type=="text/plain":
