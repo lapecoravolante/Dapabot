@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.messages import HumanMessage, SystemMessage, AIMessage
+from langchain.agents import create_agent
+from langchain_core.prompts import PromptTemplate
 from typing import List, Tuple
 from datetime import datetime
 from src.Messaggio import Messaggio
@@ -20,6 +22,9 @@ class Provider(ABC):
         self._modelli_rag=set()
         self._api_key=prefisso_token
         self._client=None
+        self._modalita_agentica = False # indica se la modalità agentica è attivata o no
+        self._agent = None   # l'agent
+        self._tools = []  # i tools per l'agent
         self._cronologia_messaggi = {} # dizionario che associa un modello alla sua cronologia dei messaggi
         self._modello_scelto = ""
         self._motore_di_embedding=None
@@ -60,8 +65,7 @@ class Provider(ABC):
                         contenuto = allegato.contenuto
                         tipo      = allegato.tipo
                         mime_type = allegato.mime_type
-                        filename  = allegato.filename
-                        print(f"Carico l'allegato: tipo: {tipo}, mime:{mime_type}, contenuto: {contenuto[:10]}")
+                        filename  = allegato.filename                        
                         if tipo in ("image", "video", "audio"):
                             blocchi.append({"type": tipo, "mime_type": mime_type, "base64": contenuto})
                         elif mime_type=="text/plain":
@@ -94,19 +98,52 @@ class Provider(ABC):
     
     def ripulisci_chat(self, modello):
         if modello in self._cronologia_messaggi:
+            print(f"Ripulita la chat di {self._nome} - {modello}")
             self._cronologia_messaggi[modello].clear()
     
-    def set_modello_scelto(self, modello):
+    def set_modello_scelto(self, modello, autocaricamento_dal_db=False):
         if not modello:
             return
         self._modello_scelto=modello
         # se non è presente nessuna cronologia per il modello...
         if modello not in self._cronologia_messaggi: 
             # ...allora la carico dal disco
-            self._cronologia_messaggi[modello]=self._carica_cronologia_da_disco(modello)
+            self._cronologia_messaggi[modello]=self._carica_cronologia_da_disco(modello) if autocaricamento_dal_db else []
         # se è None vuol dire che è la voce relativa al modello di default
         elif self._cronologia_messaggi[modello] is None:
-            self._cronologia_messaggi[modello] = self._carica_cronologia_da_disco(modello)
+            self._cronologia_messaggi[modello] = self._carica_cronologia_da_disco(modello) if autocaricamento_dal_db else []
+        # se la modalità agentica è attiva allora ricrea l'agent col nuovo modello
+        if self._modalita_agentica:
+            self._crea_agent()
+        
+
+    def get_modalita_agentica(self):
+        return self._modalita_agentica
+    
+    def set_modalita_agentica(self, attiva: bool):
+        """Imposta la modalità agentica e crea/rimuove l'agent."""
+        self._modalita_agentica = attiva
+        if attiva and self._client is not None:
+            self._crea_agent()
+        else:
+            self._agent = None
+
+    def _crea_agent(self):
+        """Crea l'agent ReAct con il nuovo API (graph-based)."""
+        if not self._client:
+            raise Exception("Client LLM non inizializzato.")
+        try:
+            self._agent = create_agent(
+                model=self._client, 
+                tools=self._tools,
+                # verbose=True,  # Imposta True per debug (stampa pensieri/azioni)
+                # max_iterations=5,  # Opzionale: limita loop ReAct
+                # system_prompt="You are a helpful assistant."  
+            )
+        except ImportError as e:
+            raise Exception(f"LangChain agents non disponibile: {e}. Assicurati di avere langchain-agents e langgraph installati.")
+        except Exception as e:
+            raise Exception(f"Errore creazione agent: {e}")
         
     def set_baseurl(self, base_url):
         if (validators.url(base_url)):
@@ -201,20 +238,29 @@ class Provider(ABC):
                         messaggi_da_inviare.append(HumanMessage(content_blocks=blocchi))
                     case _:
                         pass
+
+            cronologia_precedente=[messaggio for messaggio, _ in cronologia_modello]
+            cronologia_completa = cronologia_precedente + messaggi_da_inviare
             # Crea il prompt template
-            prompt = ChatPromptTemplate.from_messages([
-                *[messaggio[0] for messaggio in cronologia_modello],        # cronologia precedente
-                *messaggi_da_inviare,       # nuovi messaggi
-            ])
-            # Crea la catena e invoca il modello
-            base_chain = prompt | self._client
-            risposta = base_chain.invoke({})
-            # Aggiungo i messaggi utente alla cronologia
-            cronologia_modello.extend([(m, self._converti_messaggio(m)) for m in messaggi_da_inviare])
-            # Aggiungo la risposta del modello alla cronologia
-            testo_risposta = getattr(risposta, "content", risposta)
-            allegati_risposta = getattr(risposta, "content_blocks", [])
-            m=AIMessage(content=testo_risposta, content_blocks=allegati_risposta)
+            prompt = ChatPromptTemplate.from_messages([*cronologia_completa])
+            if self._modalita_agentica:
+                # Invoca l'agent con i messaggi
+                risposta = self._agent.invoke({"messages": cronologia_completa})
+                # Estrae l'ultimo messaggio dell'agent. Se serve la risposta comprensiva dei messaggi intermedi allora va salvata tutta la lista risposta["messages"]
+                ultimo_messaggio = risposta["messages"][-1]
+                testo_risposta = getattr(ultimo_messaggio, "content", ultimo_messaggio)
+                # Nessun content_blocks per agent di default
+                m = AIMessage(content=testo_risposta)
+            else:
+                # Modalità normale (codice esistente)
+                base_chain = prompt | self._client
+                risposta = base_chain.invoke({})
+                testo_risposta = getattr(risposta, "content", risposta)
+                allegati_risposta = getattr(risposta, "content_blocks", [])
+                m = AIMessage(content=testo_risposta, content_blocks=allegati_risposta)
+            # Aggiungi messaggi utente alla cronologia (comune)
+            cronologia_modello.extend([(msg, self._converti_messaggio(msg)) for msg in messaggi_da_inviare])
+            # Aggiungi risposta finale (solo l'output, senza intermedi dell'agent)
             cronologia_modello.append((m, self._converti_messaggio(m)))
         except Exception as errore:
             raise Exception(f"Errore nell'invio del messaggio: {errore}")
@@ -248,7 +294,7 @@ class Provider(ABC):
         modello = modello or self._modello_scelto
         if not modello or not self._cronologia_messaggi or not self._cronologia_messaggi[modello]:
             return []
-        return [tupla[1] for tupla in self._cronologia_messaggi[modello]]
+        return [messaggio for _, messaggio in self._cronologia_messaggi[modello]]
     
     # questo metodo va sul DB, carica i messaggi salvati e li aggiunge alla cronologia attuale
     def carica_chat_da_db(self, modello=None):

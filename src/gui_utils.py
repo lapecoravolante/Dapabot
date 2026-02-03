@@ -35,6 +35,7 @@ def inizializza():
 
         apikey_key               = f"api_key_{nome}"
         modello_key              = f"modello_{nome}"
+        agentic_key              = f"modalita_agentica_{nome}"
         sysmsg_key               = f"system_msg_{nome}"
         rag_enabled_key          = f"rag_enabled_{nome}"
         rag_topk_key             = f"rag_topk_{nome}"
@@ -47,6 +48,7 @@ def inizializza():
             st.session_state[nome]={
                 apikey_key: st.session_state.get(apikey_key) or provider.get_apikey() or conf.get("api_key", provider.get_prefisso_token()),
                 modello_key: st.session_state.get(modello_key) or provider.get_modello_scelto() or conf.get("modello", ""),
+                agentic_key: st.session_state.get(agentic_key) or provider.get_modalita_agentica() or conf.get("agentic_mode", False),
                 sysmsg_key: st.session_state.get(sysmsg_key, ""),
                 rag_enabled_key: st.session_state.get(rag_enabled_key) or provider.get_rag().get_attivo() or rag_conf.get("attivo", False),
                 rag_topk_key: st.session_state.get(rag_topk_key) or provider.get_rag().get_topk() or rag_conf.get("top_k", Rag.DEFAULT_TOPK),
@@ -72,6 +74,7 @@ def salva_configurazione(providers: Dict[str, Provider]):
         # costruisco le chiavi da salvare
         apikey_key               = f"api_key_{nome}"
         modello_key              = f"modello_{nome}"
+        agentic_key              = f"agentic_mode_{nome}"
         rag_enabled_key          = f"rag_enabled_{nome}"
         rag_topk_key             = f"rag_topk_{nome}"
         rag_model_key            = f"rag_model_{nome}"
@@ -81,6 +84,7 @@ def salva_configurazione(providers: Dict[str, Provider]):
         base_url=provider.get_baseurl()
         api_key=st.session_state.get(apikey_key) or provider.get_apikey() or conf.get("api_key", provider.get_prefisso_token())
         modello=st.session_state.get(modello_key) or provider.get_modello_scelto() or conf.get("modello", "")
+        modalita_agentica=st.session_state.get(agentic_key) or provider.get_modalita_agentica() or conf.get("modalita_agentica", False)
         attivo=st.session_state.get(rag_enabled_key) or provider.get_rag().get_attivo() or rag_conf.get("attivo", False)
         top_k=st.session_state.get(rag_topk_key) or provider.get_rag().get_topk() or rag_conf.get("top_k", Rag.DEFAULT_TOPK)
         directory_allegati=provider.get_rag().get_upload_dir() or rag_conf.get("directory_allegati", Rag.DEFAULT_UPLOAD_DIR)
@@ -93,6 +97,7 @@ def salva_configurazione(providers: Dict[str, Provider]):
                 "base_url": base_url,
                 "api_key": api_key,
                 "modello": modello,
+                "modalita_agentica": modalita_agentica,
                 Configurazione.RAG_KEY: {
                     "attivo": attivo,
                     "modello": modello_rag,
@@ -102,7 +107,7 @@ def salva_configurazione(providers: Dict[str, Provider]):
                 }
             })
         try: # rifletto immediatamente la configurazione sul provider
-            provider.set_modello_scelto(configurazioni[nome]["modello"])
+            provider.set_modello_scelto(configurazioni[nome]["modello"], st.session_state["autoload_chat_db"])
             provider.set_apikey(api_key)
             provider.set_rag(attivo=attivo, topk=top_k, modello=modello_rag, modalita_ricerca=modalita_ricerca)
         except Exception:
@@ -212,6 +217,7 @@ def crea_sidebar(providers: Dict[str, Provider]):
         # Chiavi per il provider corrente
         apikey_key                  = f"api_key_{provider_scelto}"
         modello_key                 = f"modello_{provider_scelto}"
+        agentic_key                 = f"modalita_agentica_{provider_scelto}"
         rag_enabled_key             = f"rag_enabled_{provider_scelto}"
         rag_topk_key                = f"rag_topk_{provider_scelto}"
         rag_model_key               = f"rag_model_{provider_scelto}"
@@ -253,6 +259,10 @@ def crea_sidebar(providers: Dict[str, Provider]):
             modello_scelto=""
             st.session_state[provider_scelto][modello_key]=""
 
+        # Toggle Modalità agentica
+        modalita_agentica=st.toggle("Modalità agentica", value=st.session_state[provider_scelto][agentic_key], 
+                   key=agentic_key, on_change=sincronizza_sessione, args=(agentic_key,))
+
         # Messaggio di sistema
         messaggio_di_sistema = st.text_area("📝Messaggio di sistema", key=sysmsg_key,
             placeholder="Il messaggio con cui viene istruito il modello prima di rispondere",            
@@ -286,7 +296,7 @@ def crea_sidebar(providers: Dict[str, Provider]):
                 st.caption("📂 Nessuna chat recente")
             col1, col2 = st.columns(2)
             with col1:
-                st.checkbox("Mostra chat su DB", key="chat_db_key", help="Se abilitato mostra le chat memorizzate su disco nella lista qui sopra", label_visibility="visible")
+                st.checkbox("Elenca chat su DB", key="chat_db_key", help="Se abilitato elenca le chat memorizzate su disco nella lista qui sopra", label_visibility="visible")
             with col2:
                 if st.checkbox("Autocaricamento dal DB", key="autoload_chat_db", help="Se abilitato carica automaticamente la cronologia delle chat dal disco (se presenti)", label_visibility="visible"):
                     provider.carica_chat_da_db()
@@ -416,7 +426,7 @@ def crea_sidebar(providers: Dict[str, Provider]):
                                             modello = prov.get_modello_scelto()
                                             if modello:
                                                 st.write(f"Provider: {nome_p}, modello: {modello}...")
-                                                provider.ripulisci_chat(modello)
+                                                prov.ripulisci_chat(modello)
                                     st.success("Svuotate tutte le chat", icon="✅")
                             except Exception as e:
                                 st.exception(e)
@@ -463,6 +473,7 @@ def crea_sidebar(providers: Dict[str, Provider]):
         # Aggiorna provider runtime (usa i valori restituiti dai widget)
         try:
             provider.set_client(modello_scelto, api_key)
+            provider.set_modalita_agentica(modalita_agentica)
             provider.set_rag(attivo=rag_abilitato, topk=topk, modello=modello_rag, modalita_ricerca=modalita_ricerca)
         except Exception as e:
             st.toast(f"Errore nell'impostazione dei parametri: {e}", icon="⛔")
