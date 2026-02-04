@@ -97,8 +97,7 @@ class Provider(ABC):
         return self._prefisso_token
     
     def ripulisci_chat(self, modello):
-        if modello in self._cronologia_messaggi:
-            print(f"Ripulita la chat di {self._nome} - {modello}")
+        if modello in self._cronologia_messaggi and self._cronologia_messaggi[modello]!=None:
             self._cronologia_messaggi[modello].clear()
     
     def set_modello_scelto(self, modello, autocaricamento_dal_db=False):
