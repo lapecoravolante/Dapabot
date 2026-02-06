@@ -8,12 +8,16 @@ from src.providers.loader import Loader
 from src.providers.base import Provider
 from src.providers.rag import Rag
 from src.StoricoChat import StoricoChat
+from src.DBAgent import DBAgent
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Bootstrap iniziale
 # ──────────────────────────────────────────────────────────────────────────────
 def inizializza():
-    StoricoChat.start_sqlite_web_server()
+    # Avvia i server sqlite-web per i database
+    StoricoChat.start_sqlite_web_server()  # porta 8080 per storico_chat.db
+    DBAgent.start_sqlite_web_server()      # porta 8081 per agent.db
+    
     if "providers" not in st.session_state:  # carica i providers una sola volta
         st.session_state.providers = Loader.discover_providers()
     providers = st.session_state.providers  # shortcut
@@ -118,6 +122,268 @@ def salva_configurazione(providers: Dict[str, Provider]):
         st.toast("Configurazione salvata ✅", icon="💾")
     except Exception as e:
         st.toast(f"Errore nel salvataggio: {e}", icon="💩")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Dialog configurazione tools per agent
+# ──────────────────────────────────────────────────────────────────────────────
+@st.dialog(
+    "⚙️ Configurazione Tools per Agent",
+    width="large",
+    dismissible=True,
+)
+def mostra_dialog_tools_agent():
+    """
+    Dialog per configurare i tools disponibili per l'agent.
+    I tools sono condivisi tra tutti i provider.
+    Layout split: lista tools a sinistra, form configurazione a destra.
+    """
+    st.caption("Configura i tools disponibili per tutti i provider")
+    
+    # Inizializza la lista dei tools se non è già stata fatto
+    if not DBAgent.TOOLS_LIST:
+        with st.spinner("Caricamento tools disponibili..."):
+            DBAgent.inizializza_tools_list()
+    
+    # Carica i tools già configurati dal DB
+    tools_salvati = DBAgent.carica_tools()
+    tools_salvati_dict = {t["nome_tool"]: t["configurazione"] for t in tools_salvati}
+    
+    # Inizializza lo stato della sessione per il tool selezionato
+    if "selected_tool_for_config" not in st.session_state:
+        st.session_state["selected_tool_for_config"] = None
+    if "tool_config_temp" not in st.session_state:
+        st.session_state["tool_config_temp"] = {}
+    
+    # Layout a due colonne
+    col_left, col_right = st.columns([1, 2])
+    
+    with col_left:
+        st.subheader("📋 Tools Disponibili")
+        
+        if not DBAgent.TOOLS_LIST:
+            st.warning("Nessun tool disponibile. Verifica l'installazione di langchain-community.")
+        else:
+            # Mostra la lista dei tools con checkbox
+            st.caption(f"Totale: {len(DBAgent.TOOLS_LIST)} tools")
+            
+            # Filtro di ricerca
+            search_filter = st.text_input("🔍 Cerca tool", placeholder="Filtra per nome...")
+            
+            # Filtra i tools in base alla ricerca
+            filtered_tools = [t for t in DBAgent.TOOLS_LIST if search_filter.lower() in t.lower()] if search_filter else DBAgent.TOOLS_LIST
+            
+            # Container scrollabile per la lista
+            with st.container(height=400):
+                for tool_name in sorted(filtered_tools):
+                    is_configured = tool_name in tools_salvati_dict
+                    
+                    # Crea una riga per ogni tool
+                    col_check, col_btn = st.columns([3, 1])
+                    
+                    with col_check:
+                        # Checkbox per indicare se il tool è configurato
+                        checked = st.checkbox(
+                            tool_name,
+                            value=is_configured,
+                            key=f"tool_check_{tool_name}",
+                            disabled=True,  # Solo visualizzazione
+                            label_visibility="visible"
+                        )
+                    
+                    with col_btn:
+                        # Pulsante per configurare/modificare
+                        if st.button("⚙️", key=f"config_btn_{tool_name}", help="Configura"):
+                            st.session_state["selected_tool_for_config"] = tool_name
+                            # Carica la configurazione esistente se presente
+                            if tool_name in tools_salvati_dict:
+                                st.session_state["tool_config_temp"] = tools_salvati_dict[tool_name].copy()
+                            else:
+                                st.session_state["tool_config_temp"] = {}
+    
+    with col_right:
+        st.subheader("🔧 Configurazione Tool")
+        
+        selected_tool = st.session_state.get("selected_tool_for_config")
+        
+        if not selected_tool:
+            st.info("👈 Seleziona un tool dalla lista per configurarlo")
+        else:
+            st.markdown(f"**Tool selezionato:** `{selected_tool}`")
+            
+            # Ottieni i parametri del tool
+            tool_params = DBAgent.get_tool_params(selected_tool)
+            
+            if not tool_params or (len(tool_params) == 1 and "_description" in tool_params):
+                st.info("Questo tool non ha parametri configurabili o non è stato possibile caricarli.")
+                st.caption("Puoi comunque salvarlo per renderlo disponibile all'agent.")
+            else:
+                # Mostra la descrizione se disponibile
+                if "_description" in tool_params:
+                    with st.expander("📖 Descrizione", expanded=False):
+                        st.text(tool_params["_description"])
+                
+                st.divider()
+                st.caption("Configura i parametri del tool:")
+                
+                # Form dinamico basato sui parametri
+                config_temp = st.session_state["tool_config_temp"]
+                
+                for param_name, param_info in tool_params.items():
+                    if param_name == "_description":
+                        continue
+                    
+                    param_type = param_info.get("type", "str")
+                    param_default = param_info.get("default")
+                    param_desc = param_info.get("description", "")
+                    
+                    # Valore corrente (da config temp o default)
+                    current_value = config_temp.get(param_name, param_default)
+                    
+                    # Crea il widget appropriato in base al tipo
+                    if "int" in param_type.lower():
+                        value = st.number_input(
+                            param_name,
+                            value=int(current_value) if current_value is not None else 0,
+                            help=param_desc,
+                            key=f"param_{selected_tool}_{param_name}"
+                        )
+                        config_temp[param_name] = value
+                    
+                    elif "float" in param_type.lower():
+                        value = st.number_input(
+                            param_name,
+                            value=float(current_value) if current_value is not None else 0.0,
+                            help=param_desc,
+                            key=f"param_{selected_tool}_{param_name}",
+                            format="%.2f"
+                        )
+                        config_temp[param_name] = value
+                    
+                    elif "bool" in param_type.lower():
+                        value = st.checkbox(
+                            param_name,
+                            value=bool(current_value) if current_value is not None else False,
+                            help=param_desc,
+                            key=f"param_{selected_tool}_{param_name}"
+                        )
+                        config_temp[param_name] = value
+                    
+                    elif "list" in param_type.lower() or "List" in param_type:
+                        # Per liste, usa text_area con valori separati da virgola
+                        list_value = ", ".join(str(v) for v in current_value) if isinstance(current_value, list) else str(current_value or "")
+                        value = st.text_area(
+                            param_name,
+                            value=list_value,
+                            help=f"{param_desc}\n(Valori separati da virgola)",
+                            key=f"param_{selected_tool}_{param_name}",
+                            height=100
+                        )
+                        # Converti in lista
+                        config_temp[param_name] = [v.strip() for v in value.split(",") if v.strip()]
+                    
+                    else:
+                        # Default: text_input per stringhe
+                        value = st.text_input(
+                            param_name,
+                            value=str(current_value) if current_value is not None else "",
+                            help=param_desc,
+                            key=f"param_{selected_tool}_{param_name}"
+                        )
+                        config_temp[param_name] = value
+                
+                st.session_state["tool_config_temp"] = config_temp
+            
+            st.divider()
+            
+            # Pulsanti di azione
+            col_save, col_remove, col_cancel = st.columns(3)
+            
+            with col_save:
+                if st.button("💾 Salva Tool", type="primary", use_container_width=True):
+                    try:
+                        DBAgent.salva_tool({
+                            "nome_tool": selected_tool,
+                            "configurazione": st.session_state["tool_config_temp"]
+                        })
+                        st.success(f"✅ Tool '{selected_tool}' salvato!")
+                        st.session_state["selected_tool_for_config"] = None
+                        st.session_state["tool_config_temp"] = {}
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Errore nel salvataggio: {e}")
+            
+            with col_remove:
+                if selected_tool in tools_salvati_dict:
+                    if st.button("❌ Rimuovi Tool", use_container_width=True):
+                        try:
+                            DBAgent.cancella_tool({"nome_tool": selected_tool})
+                            st.success(f"🗑️ Tool '{selected_tool}' rimosso!")
+                            st.session_state["selected_tool_for_config"] = None
+                            st.session_state["tool_config_temp"] = {}
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Errore nella rimozione: {e}")
+            
+            with col_cancel:
+                if st.button("↩️ Annulla", use_container_width=True):
+                    st.session_state["selected_tool_for_config"] = None
+                    st.session_state["tool_config_temp"] = {}
+                    st.rerun()
+    
+    st.divider()
+    
+    # Sezione gestione database
+    st.subheader("🗄️ Gestione Database")
+    col_import, col_export, col_delete = st.columns(3)
+    
+    with col_import:
+        uploaded_file = st.file_uploader("📥 Importa configurazione", type=["json"], key="import_agent_db")
+        if uploaded_file and st.button("Importa", key="btn_import_agent_db"):
+            try:
+                json_data = uploaded_file.read().decode("utf-8")
+                DBAgent.importa_db(json_data)
+                st.success("✅ Configurazione importata!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Errore nell'importazione: {e}")
+    
+    with col_export:
+        if st.button("📤 Esporta configurazione", key="btn_export_agent_db", use_container_width=True):
+            try:
+                json_data = DBAgent.esporta_db()
+                filename = f"agentdb-{datetime.now().strftime('%Y%m%d')}.json"
+                st.download_button(
+                    label="⬇️ Scarica",
+                    data=json_data,
+                    file_name=filename,
+                    mime="application/json",
+                    key="download_agent_db"
+                )
+            except Exception as e:
+                st.error(f"Errore nell'esportazione: {e}")
+    
+    with col_delete:
+        if st.button("🗑️ Elimina database", key="btn_delete_agent_db", use_container_width=True):
+            if st.session_state.get("confirm_delete_agent_db", False):
+                try:
+                    DBAgent.elimina_db()
+                    st.success("✅ Database eliminato!")
+                    st.session_state["confirm_delete_agent_db"] = False
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Errore nell'eliminazione: {e}")
+            else:
+                st.session_state["confirm_delete_agent_db"] = True
+                st.warning("⚠️ Clicca di nuovo per confermare l'eliminazione")
+    
+    st.divider()
+    
+    # Pulsante chiudi
+    if st.button("✅ Salva e Chiudi", type="primary", use_container_width=True):
+        st.session_state["tools_dialog_open"] = False
+        st.session_state["selected_tool_for_config"] = None
+        st.session_state["tool_config_temp"] = {}
+        st.rerun()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Dialog globale vector stores
@@ -259,10 +525,6 @@ def crea_sidebar(providers: Dict[str, Provider]):
             modello_scelto=""
             st.session_state[provider_scelto][modello_key]=""
 
-        # Toggle Modalità agentica
-        modalita_agentica=st.toggle("Modalità agentica", value=st.session_state[provider_scelto][agentic_key], 
-                   key=agentic_key, on_change=sincronizza_sessione, args=(agentic_key,))
-
         # Messaggio di sistema
         messaggio_di_sistema = st.text_area("📝Messaggio di sistema", key=sysmsg_key,
             placeholder="Il messaggio con cui viene istruito il modello prima di rispondere",            
@@ -300,6 +562,49 @@ def crea_sidebar(providers: Dict[str, Provider]):
             with col2:
                 if st.checkbox("Autocaricamento dal DB", key="autoload_chat_db", help="Se abilitato carica automaticamente la cronologia delle chat dal disco (se presenti)", label_visibility="visible"):
                     provider.carica_chat_da_db()
+            
+        # Sezione Modalità Agentica
+        with st.expander("🤖 Modalità Agentica", expanded=bool(st.session_state[provider_scelto][agentic_key])):
+            # Toggle Modalità agentica
+            modalita_agentica = st.toggle("Abilita Modalità Agentica", value=st.session_state[provider_scelto][agentic_key],
+                       key=agentic_key, on_change=sincronizza_sessione, args=(agentic_key,))
+            
+            if modalita_agentica:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Pulsante per configurare i tools
+                    if st.button("⚙️ Configura Tools", key="btn_config_tools", use_container_width=True):
+                        st.session_state["tools_dialog_open"] = True
+                
+                with col2:
+                    # Link per gestione avanzata DB agent.db (server avviato automaticamente all'inizializzazione)
+                    if DBAgent.is_sqlite_web_active():
+                        url = DBAgent.get_sqlite_web_url()
+                        st.markdown(
+                            f'<a href="{url}" target="_blank">'
+                            '<button style="width:100%; padding:8px; font-size:1rem;">'
+                            '🔍 Gestione avanzata DB'
+                            '</button></a>',
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        st.markdown(
+                            '<button style="width:100%; padding:8px; font-size:1rem; opacity:0.5;" disabled>'
+                            '🔍 Server DB non disponibile'
+                            '</button>',
+                            unsafe_allow_html=True
+                        )
+                
+                # Mostra info sui tools configurati
+                tools_config = DBAgent.carica_tools()
+                if tools_config:
+                    st.caption(f"✅ {len(tools_config)} tool(s) configurato/i")
+                    with st.expander("📋 Tools configurati", expanded=False):
+                        for tool in tools_config:
+                            st.write(f"• **{tool['nome_tool']}**")
+                else:
+                    st.info("ℹ️ Nessun tool configurato. Clicca su 'Configura Tools' per iniziare.")
             
         # Sezione RAG
         with st.expander("🔎 RAG", expanded=bool(st.session_state[provider_scelto][rag_enabled_key])):
@@ -479,9 +784,13 @@ def crea_sidebar(providers: Dict[str, Provider]):
             st.toast(f"Errore nell'impostazione dei parametri: {e}", icon="⛔")
     #st.sidebar.json(st.session_state)
     
-    # ---- Render della finestra modale ----
+    # ---- Render della finestra modale vector stores ----
     if st.session_state.get("vs_dialog_global_open", False):
         mostra_dialog_vectorestores_globale()
+    
+    # ---- Render della finestra modale configurazione tools ----
+    if st.session_state.get("tools_dialog_open", False):
+        mostra_dialog_tools_agent()
 
     return provider_scelto, messaggio_di_sistema
 
@@ -489,20 +798,38 @@ def crea_sidebar(providers: Dict[str, Provider]):
 # Invio messaggi & render cronologia
 # ──────────────────────────────────────────────────────────────────────────────
 def generate_response(prompt_utente, messaggio_di_sistema, provider_scelto: Provider):
+    """
+    Genera la risposta del modello o dell'agent.
+    Se la modalità agentica è attiva, mostra un feedback visivo delle operazioni.
+    """
+    # Chiudi il dialog dei tools se è aperto (evita che si riapra dopo l'invio del messaggio)
+    if st.session_state.get("tools_dialog_open", False):
+        st.session_state["tools_dialog_open"] = False
+    
     # Prepara la lista dei messaggi da inviare
-    messaggi_da_inviare = []    
+    messaggi_da_inviare = []
     # Messaggio di sistema (opzionale)
     if messaggio_di_sistema:
-        messaggi_da_inviare.append(Messaggio(testo=messaggio_di_sistema, ruolo="system")) 
+        messaggi_da_inviare.append(Messaggio(testo=messaggio_di_sistema, ruolo="system"))
     # Messaggio utente
     messaggio_utente = Messaggio(ruolo="user")
     if prompt_utente.text:
         messaggio_utente.set_testo(prompt_utente.text)
     if prompt_utente["files"]:
-        messaggio_utente.set_allegati(prompt_utente["files"])    
-    messaggi_da_inviare.append(messaggio_utente)    
-    # Invia i messaggi
-    provider_scelto.invia_messaggi(messaggi_da_inviare)  
+        messaggio_utente.set_allegati(prompt_utente["files"])
+    messaggi_da_inviare.append(messaggio_utente)
+    
+    # Invia i messaggi con feedback visivo se modalità agentica è attiva
+    if provider_scelto.get_modalita_agentica():
+        # Crea un container per il feedback con st.status()
+        with st.status("🤖 Agent in azione...", expanded=True) as status:
+            # Passa il container di status al metodo invia_messaggi
+            provider_scelto.invia_messaggi(messaggi_da_inviare, status_container=status)
+            # Aggiorna lo stato finale
+            status.update(label="✅ Operazione completata!", state="complete")
+    else:
+        # Modalità normale senza feedback visivo
+        provider_scelto.invia_messaggi(messaggi_da_inviare)
     
 def mostra_cronologia_chat(cronologia: list[Messaggio]):
     render_map = {

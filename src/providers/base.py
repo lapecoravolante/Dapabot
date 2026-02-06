@@ -3,16 +3,19 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain.messages import HumanMessage, SystemMessage, AIMessage
 from langchain.agents import create_agent
 from langchain_core.prompts import PromptTemplate
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 from datetime import datetime
 from src.Messaggio import Messaggio
 from src.Allegato import Allegato
 from src.Configurazione import Configurazione
 from src.providers.rag import Rag
 from src.StoricoChat import StoricoChat
+from src.DBAgent import DBAgent
 import base64, validators
 
 class Provider(ABC):
+    # Attributo statico condiviso tra tutti i provider
+    _tools = []  # i tools per l'agent (condivisi tra tutti i provider)
       
     def __init__(self, nome, base_url, prefisso_token=""):
         self._nome=nome
@@ -24,7 +27,6 @@ class Provider(ABC):
         self._client=None
         self._modalita_agentica = False # indica se la modalità agentica è attivata o no
         self._agent = None   # l'agent
-        self._tools = []  # i tools per l'agent
         self._cronologia_messaggi = {} # dizionario che associa un modello alla sua cronologia dei messaggi
         self._modello_scelto = ""
         self._motore_di_embedding=None
@@ -126,6 +128,70 @@ class Provider(ABC):
             self._crea_agent()
         else:
             self._agent = None
+    
+    @classmethod
+    def set_tools(cls, tools: List[Any] = []):
+        """
+        Imposta i tools da utilizzare con l'agent (metodo di classe).
+        I tools sono condivisi tra tutti i provider.
+        
+        Args:
+            tools: Lista di istanze di tools di LangChain.
+        """
+        cls._tools = tools
+    
+    def _crea_tools_instances(self, tools_config: List[Dict]) -> List[Any]:
+        """
+        Crea le istanze dei tools a partire dalla configurazione salvata nel DB.
+        Gestisce gli errori di import e fornisce messaggi informativi.
+        
+        Args:
+            tools_config: Lista di dizionari con nome_tool e configurazione.
+        
+        Returns:
+            Lista di istanze di tools di LangChain.
+        """
+        tools_instances = []
+        
+        # Mappa dei pacchetti richiesti per i tools più comuni
+        package_requirements = {
+            "DuckDuckGoSearchRun": "duckduckgo-search",
+            "WikipediaQueryRun": "wikipedia",
+            "ArxivQueryRun": "arxiv",
+            "WolframAlphaQueryRun": "wolframalpha",
+            "GoogleSearchRun": "google-api-python-client",
+            "PubmedQueryRun": "xmltodict",
+            "TavilySearchResults": "tavily-python",
+        }
+        
+        for tool_dict in tools_config:
+            tool_name = tool_dict.get("nome_tool")
+            tool_params = tool_dict.get("configurazione", {})
+            
+            try:
+                # Carica la classe del tool
+                tool_class = DBAgent._load_tool_class(tool_name)
+                
+                if tool_class:
+                    # Crea l'istanza del tool con i parametri configurati
+                    tool_instance = tool_class(**tool_params)
+                    tools_instances.append(tool_instance)
+                else:
+                    print(f"⚠️ Tool '{tool_name}' non trovato in langchain_community.tools")
+            
+            except ImportError as e:
+                # Errore di import di un pacchetto richiesto
+                required_package = package_requirements.get(tool_name, "pacchetto sconosciuto")
+                print(f"❌ Tool '{tool_name}' richiede il pacchetto '{required_package}'")
+                print(f"   Installa con: pip install {required_package}")
+                print(f"   Dettagli errore: {e}")
+                continue
+            
+            except Exception as e:
+                print(f"❌ Errore nella creazione del tool '{tool_name}': {e}")
+                continue
+        
+        return tools_instances
 
     def _crea_agent(self):
         """Crea l'agent ReAct con il nuovo API (graph-based)."""
@@ -133,11 +199,11 @@ class Provider(ABC):
             raise Exception("Client LLM non inizializzato.")
         try:
             self._agent = create_agent(
-                model=self._client, 
-                tools=self._tools,
+                model=self._client,
+                tools=Provider._tools,  # Usa l'attributo statico della classe
                 # verbose=True,  # Imposta True per debug (stampa pensieri/azioni)
                 # max_iterations=5,  # Opzionale: limita loop ReAct
-                # system_prompt="You are a helpful assistant."  
+                # system_prompt="You are a helpful assistant."
             )
         except ImportError as e:
             raise Exception(f"LangChain agents non disponibile: {e}. Assicurati di avere langchain-agents e langgraph installati.")
@@ -202,15 +268,32 @@ class Provider(ABC):
             self._client=None
             raise Exception(errore)
     
-    def invia_messaggi(self, messaggi: list[Messaggio]):
-        """Invia i messaggi al modello multimodale e aggiorna la cronologia."""
+    def invia_messaggi(self, messaggi: list[Messaggio], status_container=None):
+        """
+        Invia i messaggi al modello multimodale e aggiorna la cronologia.
+        
+        Args:
+            messaggi: Lista di messaggi da inviare.
+            status_container: Container Streamlit per mostrare il feedback (opzionale).
+        """
         if not self._modello_scelto:
             raise Exception("Client non inizializzato. Inserisci un'API KEY valida e scegli un modello.")
+        
         # lista di tuple in cui il primo elemento è un messaggio in formato Langchain e il secondo è lo stesso elemento ma in formato "Messaggio"
         cronologia_modello = self._cronologia_messaggi[self._modello_scelto]
-        messaggi_da_inviare = []  
+        messaggi_da_inviare = []
         preambolo_rag=" \nRispondi dando priorità al contesto fornito di seguito: \n"
+        
         try:
+            # Se modalità agentica è attiva, carica i tools dal DB
+            if self._modalita_agentica:
+                tools_config = DBAgent.carica_tools()
+                if tools_config:
+                    tools_instances = self._crea_tools_instances(tools_config)
+                    self.set_tools(tools_instances)
+                    if status_container:
+                        status_container.write(f"🔧 Caricati {len(tools_instances)} tools")
+            
             for m in messaggi:
                 blocchi=[]
                 match m.get_ruolo():
@@ -240,16 +323,38 @@ class Provider(ABC):
 
             cronologia_precedente=[messaggio for messaggio, _ in cronologia_modello]
             cronologia_completa = cronologia_precedente + messaggi_da_inviare
+            
             # Crea il prompt template
             prompt = ChatPromptTemplate.from_messages([*cronologia_completa])
+            
             if self._modalita_agentica:
+                if status_container:
+                    status_container.write("🧠 Analisi del problema in corso...")
+                
                 # Invoca l'agent con i messaggi
                 risposta = self._agent.invoke({"messages": cronologia_completa})
-                # Estrae l'ultimo messaggio dell'agent. Se serve la risposta comprensiva dei messaggi intermedi allora va salvata tutta la lista risposta["messages"]
+                
+                # Mostra feedback per i messaggi intermedi (tool calls)
+                if status_container and "messages" in risposta:
+                    for idx, msg in enumerate(risposta["messages"][:-1]):  # Escludi l'ultimo (risposta finale)
+                        # Verifica se il messaggio contiene tool calls
+                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            for tool_call in msg.tool_calls:
+                                tool_name = tool_call.get('name', 'Unknown')
+                                status_container.write(f"🔧 Utilizzo tool: **{tool_name}**")
+                        # Verifica se è una risposta di un tool
+                        elif hasattr(msg, 'type') and msg.type == 'tool':
+                            status_container.write(f"✅ Tool completato")
+                
+                # Estrae l'ultimo messaggio dell'agent (risposta finale, senza messaggi intermedi)
                 ultimo_messaggio = risposta["messages"][-1]
-                testo_risposta = getattr(ultimo_messaggio, "content", ultimo_messaggio)
-                # Nessun content_blocks per agent di default
+                testo_risposta = getattr(ultimo_messaggio, "content", str(ultimo_messaggio))
+                
+                # Crea AIMessage senza la sezione "tools"
                 m = AIMessage(content=testo_risposta)
+                
+                if status_container:
+                    status_container.write("✅ Risposta generata")
             else:
                 # Modalità normale (codice esistente)
                 base_chain = prompt | self._client
@@ -257,10 +362,15 @@ class Provider(ABC):
                 testo_risposta = getattr(risposta, "content", risposta)
                 allegati_risposta = getattr(risposta, "content_blocks", [])
                 m = AIMessage(content=testo_risposta, content_blocks=allegati_risposta)
+            
             # Aggiungi messaggi utente alla cronologia (comune)
             cronologia_modello.extend([(msg, self._converti_messaggio(msg)) for msg in messaggi_da_inviare])
+            
             # Aggiungi risposta finale (solo l'output, senza intermedi dell'agent)
+            # La sezione "tools" viene automaticamente esclusa perché _converti_messaggio
+            # processa solo content e content_blocks
             cronologia_modello.append((m, self._converti_messaggio(m)))
+            
         except Exception as errore:
             raise Exception(f"Errore nell'invio del messaggio: {errore}")
             

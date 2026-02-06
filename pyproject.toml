@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "docling>=2.63.0",
+    "duckduckgo-search>=8.1.1",
     "extra-streamlit-components>=0.1.81",
     "huggingface-hub>=0.36.0",
     "langchain>=1.0.7",
