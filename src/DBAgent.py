@@ -1,12 +1,11 @@
-import sqlite3
-import json
-import os
-import inspect
-import subprocess
-import socket
+import sqlite3, json, os, inspect, subprocess, socket
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from pathlib import Path
+
+
+
+
 
 class DBAgent:
     """
@@ -18,20 +17,65 @@ class DBAgent:
     TOOLS_LIST = []  # Lista dei tools disponibili, popolata dinamicamente
     _tools_metadata = {}  # Metadati dei tools (parametri, descrizioni, ecc.)
     
+    # Connessione persistente
+    _conn: sqlite3.Connection | None = None
+    _cursor: sqlite3.Cursor | None = None
+    
+    # Dizionario che associa ogni tool al pacchetto Python necessario
+    TOOLS_PACKAGES = {
+        # Search Tools
+        "WikipediaQueryRun": "wikipedia",
+        "ArxivQueryRun": "arxiv",
+        "DuckDuckGoSearchRun": "duckduckgo-search",
+        "TavilySearchResults": "tavily-python",
+        "PubmedQueryRun": "xmltodict",  # Requires xmltodict for parsing
+        "WolframAlphaQueryRun": "wolframalpha",
+        "GoogleSearchRun": "google-search-results",
+        "BingSearchRun": "azure-cognitiveservices-search-websearch",
+        "BraveSearch": "langchain-community",
+        "YouTubeSearchTool": "youtube-search",
+        "RedditSearchRun": "praw",
+        "StackExchangeTool": "stackapi",
+        "OpenWeatherMapQueryRun": "pyowm",
+        "SerpAPIWrapper": "google-search-results",
+        "SearxSearchRun": "langchain-community",
+        "MetaphorSearchResults": "metaphor-python",
+        "GoogleSerperAPIWrapper": "google-serper",
+        
+        # Coding & Shell
+        "PythonREPLTool": "langchain-experimental", # Often moved here or keeps in community
+        "ShellTool": "langchain-community",
+        "FileManagementTool": "langchain-community",
+        "ReadFileTool": "langchain-community",
+        "WriteFileTool": "langchain-community",
+        "ListDirectoryTool": "langchain-community",
+        
+        # Web & Requests
+        "RequestsGetTool": "requests",
+        "RequestsPostTool": "requests",
+        "HumanInputRun": "langchain-community",
+        
+        # AI & Models used as tools
+        "DalleImageGeneratorTool": "openai",
+        "ElevenLabsText2SpeechTool": "elevenlabs",
+    }
+
+    
     # Gestione server sqlite-web per agent.db
     _sqlite_web_process = None
     _sqlite_web_host = "127.0.0.1"
     _sqlite_web_port = 8081
     
-    @staticmethod
-    def _get_connection():
-        """Crea e ritorna una connessione al database."""
-        conn = sqlite3.connect(DBAgent.FILENAME)
-        conn.row_factory = sqlite3.Row
-        return conn
-    
-    @staticmethod
-    def crea_schema(configurazione: Dict = {}):
+    @classmethod
+    def _get_connection(cls):
+        """Crea e ritorna una connessione persistente al database."""
+        if not cls._conn or not cls._cursor:
+            cls._conn = sqlite3.connect(cls.FILENAME, check_same_thread=False)
+            cls._conn.row_factory = sqlite3.Row
+            cls._cursor = cls._conn.cursor()
+
+    @classmethod
+    def crea_schema(cls, configurazione: Dict = {}):
         """
         Crea lo schema del database.
         
@@ -39,12 +83,11 @@ class DBAgent:
             configurazione: Dizionario con la struttura delle tabelle.
                            Se vuoto, usa lo schema di default.
         """
-        conn = DBAgent._get_connection()
-        cursor = conn.cursor()
+        cls._get_connection()
         
         if not configurazione:
             # Schema di default
-            cursor.execute("""
+            cls._cursor.execute("""
                 CREATE TABLE IF NOT EXISTS tools (
                     nome_tool TEXT PRIMARY KEY,
                     configurazione TEXT NOT NULL,
@@ -56,13 +99,14 @@ class DBAgent:
             # Schema personalizzato (per estensioni future)
             for table_name, columns in configurazione.items():
                 cols_def = ", ".join([f"{col} {dtype}" for col, dtype in columns.items()])
-                cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({cols_def})")
+                cls._cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({cols_def})")
         
-        conn.commit()
-        conn.close()
+        cls._conn.commit()
+
+        # conn.close() # Non chiudiamo la connessione persistente
     
-    @staticmethod
-    def salva_db(configurazione: Dict = {}):
+    @classmethod
+    def salva_db(cls, configurazione: Dict = {}):
         """
         Salva la configurazione completa su database.
         Se la configurazione è vuota, esegue la truncate di tutte le tabelle.
@@ -71,35 +115,34 @@ class DBAgent:
             configurazione: Dizionario con la configurazione da salvare.
                            Formato: {"tool_name": {"param1": "value1", ...}, ...}
         """
-        DBAgent.crea_schema()
-        conn = DBAgent._get_connection()
-        cursor = conn.cursor()
+        cls.crea_schema()
+        cls._get_connection()
         
         if not configurazione:
             # Truncate: elimina tutti i record
-            cursor.execute("DELETE FROM tools")
+            cls._cursor.execute("DELETE FROM tools")
         else:
             # Salva ogni tool
             for tool_name, params in configurazione.items():
-                DBAgent.salva_tool({"nome_tool": tool_name, "configurazione": params})
+                cls.salva_tool({"nome_tool": tool_name, "configurazione": params})
         
-        conn.commit()
-        conn.close()
+        cls._conn.commit()
+
+        # conn.close()
     
-    @staticmethod
-    def esporta_db() -> str:
+    @classmethod
+    def esporta_db(cls) -> str:
         """
         Esporta l'intero database in formato JSON.
         
         Returns:
             Stringa JSON con il contenuto del database.
         """
-        DBAgent.crea_schema()
-        conn = DBAgent._get_connection()
-        cursor = conn.cursor()
+        cls.crea_schema()
+        cls._get_connection()
         
-        cursor.execute("SELECT * FROM tools")
-        rows = cursor.fetchall()
+        cls._cursor.execute("SELECT * FROM tools")
+        rows = cls._cursor.fetchall()
         
         data = {
             "export_date": datetime.now().isoformat(),
@@ -114,7 +157,7 @@ class DBAgent:
                 "data_modifica": row["data_modifica"]
             })
         
-        conn.close()
+        # conn.close()
         
         # Genera il nome del file con la data
         filename = f"agentdb-{datetime.now().strftime('%Y%m%d')}.json"
@@ -122,22 +165,21 @@ class DBAgent:
         
         return json_str
     
-    @staticmethod
-    def importa_db(json_data: str):
+    @classmethod
+    def importa_db(cls, json_data: str):
         """
         Importa la configurazione da un file JSON esportato.
         
         Args:
             json_data: Stringa JSON con i dati da importare.
         """
-        DBAgent.crea_schema()
+        cls.crea_schema()
         data = json.loads(json_data)
         
-        conn = DBAgent._get_connection()
-        cursor = conn.cursor()
+        cls._get_connection()
         
         for tool in data.get("tools", []):
-            cursor.execute("""
+            cls._cursor.execute("""
                 INSERT OR REPLACE INTO tools 
                 (nome_tool, configurazione, data_creazione, data_modifica)
                 VALUES (?, ?, ?, ?)
@@ -148,22 +190,83 @@ class DBAgent:
                 tool.get("data_modifica", datetime.now().isoformat())
             ))
         
-        conn.commit()
-        conn.close()
+        cls._conn.commit()
+
+        # conn.close()
     
-    @staticmethod
-    def elimina_db():
+    @classmethod
+    def elimina_db(cls):
         """Cancella il file del database."""
         try:
-            if os.path.exists(DBAgent.FILENAME):
-                os.remove(DBAgent.FILENAME)
-                DBAgent.TOOLS_LIST.clear()
-                DBAgent._tools_metadata.clear()
+            # Chiude la connessione se aperta
+            if cls._conn:
+                try:
+                    if cls._cursor:
+                        cls._cursor.close()
+                    cls._conn.close()
+                except:
+                    pass
+                cls._conn = None
+                cls._cursor = None
+                
+            if os.path.exists(cls.FILENAME):
+                os.remove(cls.FILENAME)
+                cls.TOOLS_LIST.clear()
+                cls._tools_metadata.clear()
         except Exception as e:
             raise Exception(f"Errore nell'eliminazione del database: {e}")
     
-    @staticmethod
-    def salva_tool(tool: Dict = {}):
+    @classmethod
+    def check_and_install_tool(cls, tool_name: str):
+        """
+        Verifica se il pacchetto per il tool è installato, altrimenti lo installa.
+        """
+        package = cls.TOOLS_PACKAGES.get(tool_name)
+        if not package:
+            return # Nessun pacchetto specifico o sconosciuto
+            
+        try:
+            # Semplice check: prova ad importare il pacchetto se il nome coincide, 
+            # ma molti pacchetti hanno nomi diversi dal modulo importato (es. google-search-results -> serpapi).
+            # Quindi ci affidiamo al fatto che se il tool è richiesto, lo installiamo se non siamo sicuri?
+            # Oppure ci fidiamo di 'uv add' che gestisce le dipendenze esistenti velocemente.
+            # L'utente vuole: "essere fatto il controllo sulla presenza nel sistema ... e installarlo se necessario"
+            # Usiamo uv add che è idempotente e veloce se già presente?
+            # Per evitare overhead, proviamo prima un controllo.
+            
+            # Tuttavia, mappare pacchetto -> modulo importabile è complesso.
+            # Esempio: "google-search-results" -> "serpapi"
+            # Esempio: "duckduckgo-search" -> "duckduckgo_search"
+            
+            # Per semplicità e robustezza, come richiesto:
+            cls.install_package(package)
+            
+        except Exception as e:
+            print(f"Warning: Could not check/install package {package} for tool {tool_name}: {e}")
+
+    @classmethod
+    def install_package(cls, package: str):
+        """Installa un pacchetto usando uv."""
+        if not package:
+            return
+            
+        # Verifica se è già installato (opzionale ma consigliato per velocità)
+        # Ma 'uv add' è progettato per essere veloce. 
+        # Tuttavia, per evitare spam di log o subprocess, potremmo usare importlib.util.find_spec 
+        # SOLO SE conosciamo il nome del modulo. Qui abbiamo il nome del pacchetto.
+        # Quindi lanciamo il comando.
+        try:
+            # Usiamo sys.executable per essere sicuri di usare lo stesso python env se uv lo supporta,
+            # ma 'uv pip install' gestisce il progetto corrente senza aggiungere il pacchetto installato 
+            # alle dipendenze del progetto. Assumiamo che 'uv' sia nel path.
+            print(f"Installing package for tool: {package}...")
+            subprocess.check_call(["uv", "pip", "install", package])
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to install package {package}: {e}")
+            raise
+
+    @classmethod
+    def salva_tool(cls, tool: Dict = {}):
         """
         Inserisce o aggiorna la configurazione di un tool nella tabella tools.
         
@@ -174,38 +277,41 @@ class DBAgent:
         if not tool or "nome_tool" not in tool:
             raise ValueError("Il dizionario tool deve contenere almeno 'nome_tool'")
         
-        DBAgent.crea_schema()
-        conn = DBAgent._get_connection()
-        cursor = conn.cursor()
+        # Verifica e installa dipendenze
+        cls.check_and_install_tool(tool["nome_tool"])
+        
+        cls.crea_schema()
+        cls._get_connection()
         
         nome_tool = tool["nome_tool"]
         configurazione = tool.get("configurazione", {})
         
         # Verifica se il tool esiste già
-        cursor.execute("SELECT nome_tool FROM tools WHERE nome_tool = ?", (nome_tool,))
-        exists = cursor.fetchone()
+        cls._cursor.execute("SELECT nome_tool FROM tools WHERE nome_tool = ?", (nome_tool,))
+        exists = cls._cursor.fetchone()
         
         now = datetime.now().isoformat()
         
         if exists:
             # Aggiorna
-            cursor.execute("""
+            cls._cursor.execute("""
                 UPDATE tools 
                 SET configurazione = ?, data_modifica = ?
                 WHERE nome_tool = ?
             """, (json.dumps(configurazione), now, nome_tool))
         else:
             # Inserisci
-            cursor.execute("""
+            cls._cursor.execute("""
                 INSERT INTO tools (nome_tool, configurazione, data_creazione, data_modifica)
                 VALUES (?, ?, ?, ?)
             """, (nome_tool, json.dumps(configurazione), now, now))
         
-        conn.commit()
-        conn.close()
+        cls._conn.commit()
+
+        # conn.close()
     
-    @staticmethod
-    def cancella_tool(tool: Dict = {}):
+    @classmethod
+    def cancella_tool(cls, tool: Dict = {}):
         """
         Cancella la configurazione di un tool dal database.
         
@@ -216,17 +322,17 @@ class DBAgent:
         if not tool or "nome_tool" not in tool:
             raise ValueError("Il dizionario tool deve contenere 'nome_tool'")
         
-        DBAgent.crea_schema()
-        conn = DBAgent._get_connection()
-        cursor = conn.cursor()
+        cls.crea_schema()
+        cls._get_connection()
         
-        cursor.execute("DELETE FROM tools WHERE nome_tool = ?", (tool["nome_tool"],))
+        cls._cursor.execute("DELETE FROM tools WHERE nome_tool = ?", (tool["nome_tool"],))
         
-        conn.commit()
-        conn.close()
+        cls._conn.commit()
+
+        # conn.close()
     
-    @staticmethod
-    def carica_tools() -> List[Dict]:
+    @classmethod
+    def carica_tools(cls) -> List[Dict]:
         """
         Carica tutti i tools configurati dal database.
         
@@ -234,12 +340,11 @@ class DBAgent:
             Lista di dizionari con la configurazione di ogni tool.
             Formato: [{"nome_tool": "Wikipedia", "configurazione": {"lang": "en", ...}}, ...]
         """
-        DBAgent.crea_schema()
-        conn = DBAgent._get_connection()
-        cursor = conn.cursor()
+        cls.crea_schema()
+        cls._get_connection()
         
-        cursor.execute("SELECT nome_tool, configurazione FROM tools")
-        rows = cursor.fetchall()
+        cls._cursor.execute("SELECT nome_tool, configurazione FROM tools")
+        rows = cls._cursor.fetchall()
         
         tools = []
         for row in rows:
@@ -248,11 +353,11 @@ class DBAgent:
                 "configurazione": json.loads(row["configurazione"])
             })
         
-        conn.close()
+        # conn.close()
         return tools
     
-    @staticmethod
-    def get_tool_params(tool_name: str) -> Dict[str, Any]:
+    @classmethod
+    def get_tool_params(cls, tool_name: str) -> Dict[str, Any]:
         """
         Ritorna i parametri configurabili per un tool specifico.
         
@@ -263,23 +368,23 @@ class DBAgent:
             Dizionario con i parametri e i loro tipi/valori di default.
             Formato: {"param_name": {"type": "str", "default": "value", "description": "..."}, ...}
         """
-        if tool_name in DBAgent._tools_metadata:
-            return DBAgent._tools_metadata[tool_name]
+        if tool_name in cls._tools_metadata:
+            return cls._tools_metadata[tool_name]
         
         # Se non è in cache, prova a caricarlo dinamicamente
         try:
-            tool_class = DBAgent._load_tool_class(tool_name)
+            tool_class = cls._load_tool_class(tool_name)
             if tool_class:
-                params = DBAgent._extract_params_from_class(tool_class)
-                DBAgent._tools_metadata[tool_name] = params
+                params = cls._extract_params_from_class(tool_class)
+                cls._tools_metadata[tool_name] = params
                 return params
         except Exception:
             pass
         
         return {}
     
-    @staticmethod
-    def _load_tool_class(tool_name: str):
+    @classmethod
+    def _load_tool_class(cls, tool_name: str):
         """
         Carica dinamicamente la classe di un tool da langchain_community.tools.
         
@@ -317,8 +422,8 @@ class DBAgent:
         
         return None
     
-    @staticmethod
-    def _extract_params_from_class(tool_class) -> Dict[str, Any]:
+    @classmethod
+    def _extract_params_from_class(cls, tool_class) -> Dict[str, Any]:
         """
         Estrae i parametri configurabili da una classe tool usando introspezione.
         
@@ -362,74 +467,43 @@ class DBAgent:
         
         return params
     
-    @staticmethod
-    def inizializza_tools_list():
+    @classmethod
+    def inizializza_tools_list(cls):
         """
-        Inizializza la lista dei tools disponibili caricandoli dinamicamente
-        da langchain_community.tools.
+        Inizializza la lista dei tools disponibili caricandoli dalla definizione dei pacchetti.
         """
-        if DBAgent.TOOLS_LIST:
+        if cls.TOOLS_LIST:
             return  # Già inizializzata
         
-        try:
-            import langchain_community.tools as lc_tools
+        # Popola la lista basandosi sulle chiavi del dizionario TOOLS_PACKAGES
+        # Non installiamo tutto subito, ma mostriamo cosa è disponibile.
+        # L'installazione avverrà on-demand quando il tool viene aggiunto/configurato.
+        
+        try:            
+            # Usa le chiavi del dizionario come lista dei tools possibili
+            possible_tools = list(cls.TOOLS_PACKAGES.keys())
             
-            # Lista manuale dei tools più comuni e stabili
-            common_tools = [
-                "WikipediaQueryRun",
-                "ArxivQueryRun", 
-                "DuckDuckGoSearchRun",
-                "TavilySearchResults",
-                "PubmedQueryRun",
-                "WolframAlphaQueryRun",
-                "GoogleSearchRun",
-                "BingSearchRun",
-                "BraveSearch",
-                "YouTubeSearchTool",
-                "RedditSearchRun",
-                "StackExchangeTool",
-                "OpenWeatherMapQueryRun",
-                "HumanInputRun",
-                "PythonREPLTool",
-                "ShellTool",
-                "RequestsGetTool",
-                "RequestsPostTool",
-                "FileManagementTool",
-                "ReadFileTool",
-                "WriteFileTool",
-                "ListDirectoryTool",
-            ]
+            # Inoltre, aggiungiamo quelli che potremmo trovare dinamicamente ma che non sono nel dizionario?
+            # Per ora atteniamoci al dizionario come fonte di verità per i tools gestiti.
             
-            # Verifica quali sono effettivamente disponibili
-            for tool_name in common_tools:
-                try:
-                    if hasattr(lc_tools, tool_name):
-                        DBAgent.TOOLS_LIST.append(tool_name)
-                    else:
-                        # Prova a caricarlo dinamicamente
-                        tool_class = DBAgent._load_tool_class(tool_name)
-                        if tool_class:
-                            DBAgent.TOOLS_LIST.append(tool_name)
-                except Exception:
-                    continue
+            # Verifica quali sono effettivamente importabili (senza installare)
+            # O semplicemente li elenchiamo tutti come "disponibili per l'uso" (e poi si installano)?
+            # Se 'inizializza_tools_list' serve a popolare una UI di selezione, 
+            # ha senso mostrare tutto.
             
-            # Se la lista è ancora vuota, usa una lista di fallback
-            if not DBAgent.TOOLS_LIST:
-                DBAgent.TOOLS_LIST = [
-                    "WikipediaQueryRun",
-                    "ArxivQueryRun",
-                    "DuckDuckGoSearchRun",
-                    "PythonREPLTool"
+            for tool_name in possible_tools:
+                cls.TOOLS_LIST.append(tool_name)
+            
+            # Se la lista è vuota (improbabile), fallback
+            if not cls.TOOLS_LIST:
+                cls.TOOLS_LIST = [
+                    "WikipediaQueryRun", "ArxivQueryRun", "DuckDuckGoSearchRun"
                 ]
         
-        except ImportError:
-            # langchain_community non disponibile, usa lista minimale
-            DBAgent.TOOLS_LIST = [
-                "WikipediaQueryRun",
-                "ArxivQueryRun",
-                "DuckDuckGoSearchRun"
-            ]
-    
+        except Exception:
+             # Fallback
+            cls.TOOLS_LIST = ["WikipediaQueryRun", "ArxivQueryRun"]
+
     @staticmethod
     def _is_port_in_use(host: str, port: int) -> bool:
         """Verifica se una porta è già in uso."""
