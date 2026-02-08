@@ -111,8 +111,8 @@ def salva_configurazione(providers: Dict[str, Provider]):
                 }
             })
         try: # rifletto immediatamente la configurazione sul provider
-            provider.set_modello_scelto(configurazioni[nome]["modello"], st.session_state["autoload_chat_db"])
-            provider.set_apikey(api_key)
+            provider.set_modello_scelto(modello=modello, autoload_chat_db=st.session_state["autoload_chat_db"])
+            provider.set_apikey(api_key=api_key)
             provider.set_rag(attivo=attivo, topk=top_k, modello=modello_rag, modalita_ricerca=modalita_ricerca)
         except Exception:
             pass # Non bloccare il salvataggio su errori runtime
@@ -130,6 +130,7 @@ def salva_configurazione(providers: Dict[str, Provider]):
     "⚙️ Configurazione Tools per Agent",
     width="large",
     dismissible=True,
+    on_dismiss=lambda: st.session_state.update({"tools_dialog_open":False})
 )
 def mostra_dialog_tools_agent():
     """
