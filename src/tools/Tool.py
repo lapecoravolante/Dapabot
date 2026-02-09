@@ -3,11 +3,11 @@ import subprocess, os
 
 class Tool(ABC):
 
-    def __init__(self, nome="", variabili_necessarie=[], pacchetti_pytthon_necessari=[], configurazione={}) -> None:
-        self._nome=""
-        self._variabili_necessarie={} # dizionario delle variabili d'ambiente (e relativo valore) necessarie per il corretto funzionamentod del tool
-        self._pacchetti_pytthon_necessari=[] # lista dei pacchetti python necessari per il corretto funzionamentod del tool
-        self._configurazione = {} # la configurazione del tool in formato JSON
+    def __init__(self, nome="", variabili_necessarie=None, pacchetti_pytthon_necessari=None, configurazione=None) -> None:
+        self._nome = nome
+        self._variabili_necessarie = variabili_necessarie if variabili_necessarie is not None else {}
+        self._pacchetti_pytthon_necessari = pacchetti_pytthon_necessari if pacchetti_pytthon_necessari is not None else []
+        self._configurazione = configurazione if configurazione is not None else {}
         self.installa_pacchetti()
 
     def installa_pacchetti(self) -> None:

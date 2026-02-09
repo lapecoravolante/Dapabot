@@ -9,6 +9,7 @@ config.json
 uploads/
 vectorstore_cache/
 storico_chat.db
+agent.db
 
 # Virtual environments
 .venv

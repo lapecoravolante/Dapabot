@@ -18,7 +18,24 @@ def inizializza():
     # Avvia i server sqlite-web per i database
     StoricoChat.start_sqlite_web_server()  # porta 8080 per storico_chat.db
     DBAgent.start_sqlite_web_server()      # porta 8081 per agent.db
-    tools_loader.discover_tools()          # carica i tools disponibili
+    
+    # Carica i tools disponibili e memorizza le istanze
+    if "tools_instances" not in st.session_state:
+        st.session_state.tools_instances = tools_loader.discover_tools()
+        
+        # Carica le configurazioni salvate e applicale alle istanze
+        tools_salvati = DBAgent.carica_tools()
+        for tool_config in tools_salvati:
+            nome_tool = tool_config["nome_tool"]
+            configurazione = tool_config["configurazione"]
+            
+            # Trova l'istanza corrispondente
+            if nome_tool in st.session_state.tools_instances:
+                instance = st.session_state.tools_instances[nome_tool]
+                # Applica la configurazione salvata all'istanza
+                for key, value in configurazione.items():
+                    if hasattr(instance, key):
+                        setattr(instance, key, value)
 
     
     if "providers" not in st.session_state:  # carica i providers una sola volta
@@ -143,10 +160,12 @@ def mostra_dialog_tools_agent():
     """
     st.caption("Configura i tools disponibili per tutti i provider")
     
-    # Inizializza la lista dei tools se non è già stata fatto
-    if not DBAgent.TOOLS_LIST:
-        with st.spinner("Caricamento tools disponibili..."):
-            DBAgent.inizializza_tools_list()
+    # Ottieni le istanze dei tools dal session state
+    tools_instances = st.session_state.get("tools_instances", {})
+    
+    if not tools_instances:
+        st.warning("Nessun tool disponibile. Verifica l'installazione dei tools in src/tools/")
+        return
     
     # Carica i tools già configurati dal DB
     tools_salvati = DBAgent.carica_tools()
@@ -163,46 +182,33 @@ def mostra_dialog_tools_agent():
     
     with col_left:
         st.subheader("📋 Tools Disponibili")
+        st.caption(f"Totale: {len(tools_instances)} tools")
         
-        if not DBAgent.TOOLS_LIST:
-            st.warning("Nessun tool disponibile. Verifica l'installazione di langchain-community.")
-        else:
-            # Mostra la lista dei tools con checkbox
-            st.caption(f"Totale: {len(DBAgent.TOOLS_LIST)} tools")
-            
-            # Filtro di ricerca
-            search_filter = st.text_input("🔍 Cerca tool", placeholder="Filtra per nome...")
-            
-            # Filtra i tools in base alla ricerca
-            filtered_tools = [t for t in DBAgent.TOOLS_LIST if search_filter.lower() in t.lower()] if search_filter else DBAgent.TOOLS_LIST
-            
-            # Container scrollabile per la lista
-            with st.container(height=400):
-                for tool_name in sorted(filtered_tools):
-                    is_configured = tool_name in tools_salvati_dict
-                    
-                    # Crea una riga per ogni tool
-                    col_check, col_btn = st.columns([3, 1])
-                    
-                    with col_check:
-                        # Checkbox per indicare se il tool è configurato
-                        checked = st.checkbox(
-                            tool_name,
-                            value=is_configured,
-                            key=f"tool_check_{tool_name}",
-                            disabled=True,  # Solo visualizzazione
-                            label_visibility="visible"
-                        )
-                    
-                    with col_btn:
-                        # Pulsante per configurare/modificare
-                        if st.button("⚙️", key=f"config_btn_{tool_name}", help="Configura"):
-                            st.session_state["selected_tool_for_config"] = tool_name
-                            # Carica la configurazione esistente se presente
-                            if tool_name in tools_salvati_dict:
-                                st.session_state["tool_config_temp"] = tools_salvati_dict[tool_name].copy()
-                            else:
-                                st.session_state["tool_config_temp"] = {}
+        # Filtro di ricerca
+        search_filter = st.text_input("🔍 Cerca tool", placeholder="Filtra per nome...")
+        
+        # Filtra i tools in base alla ricerca
+        tool_names = list(tools_instances.keys())
+        filtered_tools = [t for t in tool_names if search_filter.lower() in t.lower()] if search_filter else tool_names
+        
+        # Container scrollabile per la lista
+        with st.container(height=400):
+            for tool_name in sorted(filtered_tools):
+                is_configured = tool_name in tools_salvati_dict
+                
+                # Crea un pulsante cliccabile per ogni tool
+                # Usa un emoji per indicare se è configurato
+                label = f"{'✅' if is_configured else '⚪'} {tool_name}"
+                
+                # Pulsante che seleziona il tool quando cliccato
+                if st.button(label, key=f"select_btn_{tool_name}", use_container_width=True):
+                    st.session_state["selected_tool_for_config"] = tool_name
+                    # Carica la configurazione esistente se presente
+                    if tool_name in tools_salvati_dict:
+                        st.session_state["tool_config_temp"] = tools_salvati_dict[tool_name].copy()
+                    else:
+                        st.session_state["tool_config_temp"] = {}
+                    st.rerun()
     
     with col_right:
         st.subheader("🔧 Configurazione Tool")
@@ -214,71 +220,69 @@ def mostra_dialog_tools_agent():
         else:
             st.markdown(f"**Tool selezionato:** `{selected_tool}`")
             
-            # Ottieni i parametri del tool
-            tool_params = DBAgent.get_tool_params(selected_tool)
+            # Ottieni l'istanza del tool
+            tool_instance = tools_instances.get(selected_tool)
             
-            if not tool_params or (len(tool_params) == 1 and "_description" in tool_params):
-                st.info("Questo tool non ha parametri configurabili o non è stato possibile caricarli.")
+            if not tool_instance:
+                st.error(f"Tool '{selected_tool}' non trovato nelle istanze")
+                return
+            
+            # Ottieni la configurazione dal tool usando get_configurazione()
+            tool_config = tool_instance.get_configurazione()
+            
+            # Filtra gli attributi interni (che iniziano con _)
+            configurable_params = {k: v for k, v in tool_config.items() if not k.startswith('_')}
+            
+            if not configurable_params:
+                st.info("Questo tool non ha parametri configurabili.")
                 st.caption("Puoi comunque salvarlo per renderlo disponibile all'agent.")
             else:
-                # Mostra la descrizione se disponibile
-                if "_description" in tool_params:
-                    with st.expander("📖 Descrizione", expanded=False):
-                        st.text(tool_params["_description"])
-                
                 st.divider()
                 st.caption("Configura i parametri del tool:")
                 
                 # Form dinamico basato sui parametri
                 config_temp = st.session_state["tool_config_temp"]
                 
-                for param_name, param_info in tool_params.items():
-                    if param_name == "_description":
-                        continue
+                for param_name, param_value in configurable_params.items():
+                    # Determina il tipo dal valore corrente
+                    param_type = type(param_value).__name__
                     
-                    param_type = param_info.get("type", "str")
-                    param_default = param_info.get("default")
-                    param_desc = param_info.get("description", "")
-                    
-                    # Valore corrente (da config temp o default)
-                    current_value = config_temp.get(param_name, param_default)
+                    # Valore corrente (da config temp o dal tool)
+                    current_value = config_temp.get(param_name, param_value)
                     
                     # Crea il widget appropriato in base al tipo
-                    if "int" in param_type.lower():
-                        value = st.number_input(
+                    if isinstance(param_value, bool):
+                        value = st.checkbox(
                             param_name,
-                            value=int(current_value) if current_value is not None else 0,
-                            help=param_desc,
+                            value=bool(current_value),
                             key=f"param_{selected_tool}_{param_name}"
                         )
                         config_temp[param_name] = value
                     
-                    elif "float" in param_type.lower():
+                    elif isinstance(param_value, int):
+                        value = st.number_input(
+                            param_name,
+                            value=int(current_value) if current_value is not None else 0,
+                            key=f"param_{selected_tool}_{param_name}"
+                        )
+                        config_temp[param_name] = value
+                    
+                    elif isinstance(param_value, float):
                         value = st.number_input(
                             param_name,
                             value=float(current_value) if current_value is not None else 0.0,
-                            help=param_desc,
                             key=f"param_{selected_tool}_{param_name}",
                             format="%.2f"
                         )
                         config_temp[param_name] = value
                     
-                    elif "bool" in param_type.lower():
-                        value = st.checkbox(
-                            param_name,
-                            value=bool(current_value) if current_value is not None else False,
-                            help=param_desc,
-                            key=f"param_{selected_tool}_{param_name}"
-                        )
-                        config_temp[param_name] = value
-                    
-                    elif "list" in param_type.lower() or "List" in param_type:
+                    elif isinstance(param_value, list):
                         # Per liste, usa text_area con valori separati da virgola
                         list_value = ", ".join(str(v) for v in current_value) if isinstance(current_value, list) else str(current_value or "")
                         value = st.text_area(
                             param_name,
                             value=list_value,
-                            help=f"{param_desc}\n(Valori separati da virgola)",
+                            help="Valori separati da virgola",
                             key=f"param_{selected_tool}_{param_name}",
                             height=100
                         )
@@ -290,7 +294,6 @@ def mostra_dialog_tools_agent():
                         value = st.text_input(
                             param_name,
                             value=str(current_value) if current_value is not None else "",
-                            help=param_desc,
                             key=f"param_{selected_tool}_{param_name}"
                         )
                         config_temp[param_name] = value
@@ -305,6 +308,12 @@ def mostra_dialog_tools_agent():
             with col_save:
                 if st.button("💾 Salva Tool", type="primary", use_container_width=True):
                     try:
+                        # Aggiorna l'istanza del tool con i nuovi valori
+                        for key, value in st.session_state["tool_config_temp"].items():
+                            if hasattr(tool_instance, key):
+                                setattr(tool_instance, key, value)
+                        
+                        # Salva nel database
                         DBAgent.salva_tool({
                             "nome_tool": selected_tool,
                             "configurazione": st.session_state["tool_config_temp"]

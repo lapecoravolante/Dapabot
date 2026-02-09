@@ -14,51 +14,10 @@ class DBAgent:
     """
     
     FILENAME = "agent.db"
-    TOOLS_LIST = []  # Lista dei tools disponibili, popolata dinamicamente
-    _tools_metadata = {}  # Metadati dei tools (parametri, descrizioni, ecc.)
     
     # Connessione persistente
     _conn: sqlite3.Connection | None = None
     _cursor: sqlite3.Cursor | None = None
-    
-    # Dizionario che associa ogni tool al pacchetto Python necessario
-    TOOLS_PACKAGES = {
-        # Search Tools
-        "WikipediaQueryRun": "wikipedia",
-        "ArxivQueryRun": "arxiv",
-        "DuckDuckGoSearchRun": "duckduckgo-search",
-        "TavilySearchResults": "tavily-python",
-        "PubmedQueryRun": "xmltodict",  # Requires xmltodict for parsing
-        "WolframAlphaQueryRun": "wolframalpha",
-        "GoogleSearchRun": "google-search-results",
-        "BingSearchRun": "azure-cognitiveservices-search-websearch",
-        "BraveSearch": "langchain-community",
-        "YouTubeSearchTool": "youtube-search",
-        "RedditSearchRun": "praw",
-        "StackExchangeTool": "stackapi",
-        "OpenWeatherMapQueryRun": "pyowm",
-        "SerpAPIWrapper": "google-search-results",
-        "SearxSearchRun": "langchain-community",
-        "MetaphorSearchResults": "metaphor-python",
-        "GoogleSerperAPIWrapper": "google-serper",
-        
-        # Coding & Shell
-        "PythonREPLTool": "langchain-experimental", # Often moved here or keeps in community
-        "ShellTool": "langchain-community",
-        "FileManagementTool": "langchain-community",
-        "ReadFileTool": "langchain-community",
-        "WriteFileTool": "langchain-community",
-        "ListDirectoryTool": "langchain-community",
-        
-        # Web & Requests
-        "RequestsGetTool": "requests",
-        "RequestsPostTool": "requests",
-        "HumanInputRun": "langchain-community",
-        
-        # AI & Models used as tools
-        "DalleImageGeneratorTool": "openai",
-        "ElevenLabsText2SpeechTool": "elevenlabs",
-    }
 
     
     # Gestione server sqlite-web per agent.db
@@ -211,60 +170,9 @@ class DBAgent:
                 
             if os.path.exists(cls.FILENAME):
                 os.remove(cls.FILENAME)
-                cls.TOOLS_LIST.clear()
-                cls._tools_metadata.clear()
         except Exception as e:
             raise Exception(f"Errore nell'eliminazione del database: {e}")
     
-    @classmethod
-    def check_and_install_tool(cls, tool_name: str):
-        """
-        Verifica se il pacchetto per il tool è installato, altrimenti lo installa.
-        """
-        package = cls.TOOLS_PACKAGES.get(tool_name)
-        if not package:
-            return # Nessun pacchetto specifico o sconosciuto
-            
-        try:
-            # Semplice check: prova ad importare il pacchetto se il nome coincide, 
-            # ma molti pacchetti hanno nomi diversi dal modulo importato (es. google-search-results -> serpapi).
-            # Quindi ci affidiamo al fatto che se il tool è richiesto, lo installiamo se non siamo sicuri?
-            # Oppure ci fidiamo di 'uv add' che gestisce le dipendenze esistenti velocemente.
-            # L'utente vuole: "essere fatto il controllo sulla presenza nel sistema ... e installarlo se necessario"
-            # Usiamo uv add che è idempotente e veloce se già presente?
-            # Per evitare overhead, proviamo prima un controllo.
-            
-            # Tuttavia, mappare pacchetto -> modulo importabile è complesso.
-            # Esempio: "google-search-results" -> "serpapi"
-            # Esempio: "duckduckgo-search" -> "duckduckgo_search"
-            
-            # Per semplicità e robustezza, come richiesto:
-            cls.install_package(package)
-            
-        except Exception as e:
-            print(f"Warning: Could not check/install package {package} for tool {tool_name}: {e}")
-
-    @classmethod
-    def install_package(cls, package: str):
-        """Installa un pacchetto usando uv."""
-        if not package:
-            return
-            
-        # Verifica se è già installato (opzionale ma consigliato per velocità)
-        # Ma 'uv add' è progettato per essere veloce. 
-        # Tuttavia, per evitare spam di log o subprocess, potremmo usare importlib.util.find_spec 
-        # SOLO SE conosciamo il nome del modulo. Qui abbiamo il nome del pacchetto.
-        # Quindi lanciamo il comando.
-        try:
-            # Usiamo sys.executable per essere sicuri di usare lo stesso python env se uv lo supporta,
-            # ma 'uv pip install' gestisce il progetto corrente senza aggiungere il pacchetto installato 
-            # alle dipendenze del progetto. Assumiamo che 'uv' sia nel path.
-            print(f"Installing package for tool: {package}...")
-            subprocess.check_call(["uv", "pip", "install", package])
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to install package {package}: {e}")
-            raise
-
     @classmethod
     def salva_tool(cls, tool: Dict = {}):
         """
@@ -276,9 +184,6 @@ class DBAgent:
         """
         if not tool or "nome_tool" not in tool:
             raise ValueError("Il dizionario tool deve contenere almeno 'nome_tool'")
-        
-        # Verifica e installa dipendenze
-        cls.check_and_install_tool(tool["nome_tool"])
         
         cls.crea_schema()
         cls._get_connection()
@@ -356,154 +261,6 @@ class DBAgent:
         # conn.close()
         return tools
     
-    @classmethod
-    def get_tool_params(cls, tool_name: str) -> Dict[str, Any]:
-        """
-        Ritorna i parametri configurabili per un tool specifico.
-        
-        Args:
-            tool_name: Nome del tool.
-        
-        Returns:
-            Dizionario con i parametri e i loro tipi/valori di default.
-            Formato: {"param_name": {"type": "str", "default": "value", "description": "..."}, ...}
-        """
-        if tool_name in cls._tools_metadata:
-            return cls._tools_metadata[tool_name]
-        
-        # Se non è in cache, prova a caricarlo dinamicamente
-        try:
-            tool_class = cls._load_tool_class(tool_name)
-            if tool_class:
-                params = cls._extract_params_from_class(tool_class)
-                cls._tools_metadata[tool_name] = params
-                return params
-        except Exception:
-            pass
-        
-        return {}
-    
-    @classmethod
-    def _load_tool_class(cls, tool_name: str):
-        """
-        Carica dinamicamente la classe di un tool da langchain_community.tools.
-        
-        Args:
-            tool_name: Nome del tool.
-        
-        Returns:
-            La classe del tool o None se non trovata.
-        """
-        try:
-            # Prova a importare da langchain_community.tools
-            module = __import__(f"langchain_community.tools", fromlist=[tool_name])
-            if hasattr(module, tool_name):
-                return getattr(module, tool_name)
-            
-            # Prova con il nome in lowercase
-            tool_name_lower = tool_name.lower()
-            if hasattr(module, tool_name_lower):
-                return getattr(module, tool_name_lower)
-            
-            # Prova a cercare nei sottomoduli
-            submodule_name = tool_name_lower.replace("tool", "").replace("_", "")
-            try:
-                submodule = __import__(
-                    f"langchain_community.tools.{submodule_name}", 
-                    fromlist=[tool_name]
-                )
-                if hasattr(submodule, tool_name):
-                    return getattr(submodule, tool_name)
-            except ImportError:
-                pass
-            
-        except Exception:
-            pass
-        
-        return None
-    
-    @classmethod
-    def _extract_params_from_class(cls, tool_class) -> Dict[str, Any]:
-        """
-        Estrae i parametri configurabili da una classe tool usando introspezione.
-        
-        Args:
-            tool_class: La classe del tool.
-        
-        Returns:
-            Dizionario con i parametri e i loro metadati.
-        """
-        params = {}
-        
-        try:
-            # Prova a ottenere i parametri dal __init__
-            sig = inspect.signature(tool_class.__init__)
-            for param_name, param in sig.parameters.items():
-                if param_name in ('self', 'args', 'kwargs'):
-                    continue
-                
-                param_info = {
-                    "type": "str",  # default
-                    "default": None,
-                    "description": ""
-                }
-                
-                # Determina il tipo
-                if param.annotation != inspect.Parameter.empty:
-                    param_info["type"] = str(param.annotation).replace("<class '", "").replace("'>", "")
-                
-                # Valore di default
-                if param.default != inspect.Parameter.empty:
-                    param_info["default"] = param.default
-                
-                params[param_name] = param_info
-            
-            # Prova a ottenere la descrizione dalla docstring
-            if tool_class.__doc__:
-                params["_description"] = tool_class.__doc__.strip()
-        
-        except Exception:
-            pass
-        
-        return params
-    
-    @classmethod
-    def inizializza_tools_list(cls):
-        """
-        Inizializza la lista dei tools disponibili caricandoli dalla definizione dei pacchetti.
-        """
-        if cls.TOOLS_LIST:
-            return  # Già inizializzata
-        
-        # Popola la lista basandosi sulle chiavi del dizionario TOOLS_PACKAGES
-        # Non installiamo tutto subito, ma mostriamo cosa è disponibile.
-        # L'installazione avverrà on-demand quando il tool viene aggiunto/configurato.
-        
-        try:            
-            # Usa le chiavi del dizionario come lista dei tools possibili
-            possible_tools = list(cls.TOOLS_PACKAGES.keys())
-            
-            # Inoltre, aggiungiamo quelli che potremmo trovare dinamicamente ma che non sono nel dizionario?
-            # Per ora atteniamoci al dizionario come fonte di verità per i tools gestiti.
-            
-            # Verifica quali sono effettivamente importabili (senza installare)
-            # O semplicemente li elenchiamo tutti come "disponibili per l'uso" (e poi si installano)?
-            # Se 'inizializza_tools_list' serve a popolare una UI di selezione, 
-            # ha senso mostrare tutto.
-            
-            for tool_name in possible_tools:
-                cls.TOOLS_LIST.append(tool_name)
-            
-            # Se la lista è vuota (improbabile), fallback
-            if not cls.TOOLS_LIST:
-                cls.TOOLS_LIST = [
-                    "WikipediaQueryRun", "ArxivQueryRun", "DuckDuckGoSearchRun"
-                ]
-        
-        except Exception:
-             # Fallback
-            cls.TOOLS_LIST = ["WikipediaQueryRun", "ArxivQueryRun"]
-
     @staticmethod
     def _is_port_in_use(host: str, port: int) -> bool:
         """Verifica se una porta è già in uso."""

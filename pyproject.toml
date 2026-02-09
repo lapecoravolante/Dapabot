@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "arxiv>=2.4.0",
     "docling>=2.63.0",
     "duckduckgo-search>=8.1.1",
     "extra-streamlit-components>=0.1.81",
@@ -16,6 +17,7 @@ dependencies = [
     "langchain-docling>=2.0.0",
     "langchain-huggingface>=1.0.1",
     "langchain-openai>=1.0.3",
+    "pygithub>=2.8.1",
     "rapidocr-onnxruntime>=1.4.4",
     "sentence-transformers>=5.1.2",
     "sqlite-web>=0.6.8",

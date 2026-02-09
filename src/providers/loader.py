@@ -9,6 +9,7 @@ class Loader():
     _moduli={}
     _mutex = Lock()
     
+    @staticmethod
     def discover_providers():
         with Loader._mutex:
             # importa tutti i moduli del package providers
