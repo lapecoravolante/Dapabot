@@ -9,6 +9,7 @@ from src.providers.base import Provider
 from src.providers.rag import Rag
 from src.StoricoChat import StoricoChat
 from src.DBAgent import DBAgent
+from src.tools.loader import Loader as tools_loader
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Bootstrap iniziale
@@ -17,6 +18,8 @@ def inizializza():
     # Avvia i server sqlite-web per i database
     StoricoChat.start_sqlite_web_server()  # porta 8080 per storico_chat.db
     DBAgent.start_sqlite_web_server()      # porta 8081 per agent.db
+    tools_loader.discover_tools()          # carica i tools disponibili
+
     
     if "providers" not in st.session_state:  # carica i providers una sola volta
         st.session_state.providers = Loader.discover_providers()
