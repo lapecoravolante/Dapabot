@@ -1,9 +1,9 @@
+import streamlit as st
 from abc import ABC, abstractmethod
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.messages import HumanMessage, SystemMessage, AIMessage
 from langchain.agents import create_agent
-from langchain_core.prompts import PromptTemplate
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Any
 from datetime import datetime
 from src.Messaggio import Messaggio
 from src.Allegato import Allegato
@@ -125,9 +125,39 @@ class Provider(ABC):
         """Imposta la modalità agentica e crea/rimuove l'agent."""
         self._modalita_agentica = attiva
         if attiva and self._client is not None:
+            # Carica i tools dal DB se non sono già stati caricati
+            if not Provider._tools:
+                self._carica_tools_da_db()
             self._crea_agent()
         else:
             self._agent = None
+    
+    def _carica_tools_da_db(self):
+        """Carica i tools configurati dal database e li imposta nel provider."""
+        from src.DBAgent import DBAgent
+        import streamlit as st
+        
+        tools_config = DBAgent.carica_tools()
+        if not tools_config:
+            return
+        
+        all_tools_instances = st.session_state.get("tools_instances", {})
+        if not all_tools_instances:
+            return
+        
+        tools_to_use = []
+        for tool_dict in tools_config:
+            tool_name = tool_dict.get("nome_tool")
+            if tool_name in all_tools_instances:
+                tool_instance = all_tools_instances[tool_name]
+                tools = tool_instance.get_tool()
+                if isinstance(tools, list):
+                    tools_to_use.extend(tools)
+                else:
+                    tools_to_use.append(tools)
+        
+        if tools_to_use:
+            Provider.set_tools(tools_to_use)
     
     @classmethod
     def set_tools(cls, tools: List[Any] = []):
@@ -140,59 +170,6 @@ class Provider(ABC):
         """
         cls._tools = tools
     
-    def _crea_tools_instances(self, tools_config: List[Dict]) -> List[Any]:
-        """
-        Crea le istanze dei tools a partire dalla configurazione salvata nel DB.
-        Gestisce gli errori di import e fornisce messaggi informativi.
-        
-        Args:
-            tools_config: Lista di dizionari con nome_tool e configurazione.
-        
-        Returns:
-            Lista di istanze di tools di LangChain.
-        """
-        tools_instances = []
-        
-        # Mappa dei pacchetti richiesti per i tools più comuni
-        package_requirements = {
-            "DuckDuckGoSearchRun": "duckduckgo-search",
-            "WikipediaQueryRun": "wikipedia",
-            "ArxivQueryRun": "arxiv",
-            "WolframAlphaQueryRun": "wolframalpha",
-            "GoogleSearchRun": "google-api-python-client",
-            "PubmedQueryRun": "xmltodict",
-            "TavilySearchResults": "tavily-python",
-        }
-        
-        for tool_dict in tools_config:
-            tool_name = tool_dict.get("nome_tool")
-            tool_params = tool_dict.get("configurazione", {})
-            
-            try:
-                # Carica la classe del tool
-                tool_class = DBAgent._load_tool_class(tool_name)
-                
-                if tool_class:
-                    # Crea l'istanza del tool con i parametri configurati
-                    tool_instance = tool_class(**tool_params)
-                    tools_instances.append(tool_instance)
-                else:
-                    print(f"⚠️ Tool '{tool_name}' non trovato in langchain_community.tools")
-            
-            except ImportError as e:
-                # Errore di import di un pacchetto richiesto
-                required_package = package_requirements.get(tool_name, "pacchetto sconosciuto")
-                print(f"❌ Tool '{tool_name}' richiede il pacchetto '{required_package}'")
-                print(f"   Installa con: pip install {required_package}")
-                print(f"   Dettagli errore: {e}")
-                continue
-            
-            except Exception as e:
-                print(f"❌ Errore nella creazione del tool '{tool_name}': {e}")
-                continue
-        
-        return tools_instances
-
     def _crea_agent(self):
         """Crea l'agent ReAct con il nuovo API (graph-based)."""
         if not self._client:
@@ -285,15 +262,6 @@ class Provider(ABC):
         preambolo_rag=" \nRispondi dando priorità al contesto fornito di seguito: \n"
         
         try:
-            # Se modalità agentica è attiva, carica i tools dal DB
-            if self._modalita_agentica:
-                tools_config = DBAgent.carica_tools()
-                if tools_config:
-                    tools_instances = self._crea_tools_instances(tools_config)
-                    self.set_tools(tools_instances)
-                    if status_container:
-                        status_container.write(f"🔧 Caricati {len(tools_instances)} tools")
-            
             for m in messaggi:
                 blocchi=[]
                 match m.get_ruolo():
@@ -329,6 +297,10 @@ class Provider(ABC):
             
             if self._modalita_agentica:
                 if status_container:
+                    # Mostra sempre il numero di tools disponibili
+                    if self._tools:
+                        status_container.write(f"🔧 {len(self._tools)} tools disponibili")
+                    
                     status_container.write("🧠 Analisi del problema in corso...")
                 
                 # Invoca l'agent con i messaggi
