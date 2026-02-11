@@ -49,6 +49,7 @@ class DBAgent:
                 CREATE TABLE IF NOT EXISTS tools (
                     nome_tool TEXT PRIMARY KEY,
                     configurazione TEXT NOT NULL,
+                    attivo INTEGER DEFAULT 1,
                     data_creazione TEXT NOT NULL,
                     data_modifica TEXT NOT NULL
                 )
@@ -111,6 +112,7 @@ class DBAgent:
             data["tools"].append({
                 "nome_tool": row["nome_tool"],
                 "configurazione": json.loads(row["configurazione"]),
+                "attivo": bool(row["attivo"]),
                 "data_creazione": row["data_creazione"],
                 "data_modifica": row["data_modifica"]
             })
@@ -138,12 +140,13 @@ class DBAgent:
         
         for tool in data.get("tools", []):
             cls._cursor.execute("""
-                INSERT OR REPLACE INTO tools 
-                (nome_tool, configurazione, data_creazione, data_modifica)
-                VALUES (?, ?, ?, ?)
+                INSERT OR REPLACE INTO tools
+                (nome_tool, configurazione, attivo, data_creazione, data_modifica)
+                VALUES (?, ?, ?, ?, ?)
             """, (
                 tool["nome_tool"],
                 json.dumps(tool["configurazione"]),
+                1 if tool.get("attivo", True) else 0,
                 tool.get("data_creazione", datetime.now().isoformat()),
                 tool.get("data_modifica", datetime.now().isoformat())
             ))
@@ -178,8 +181,8 @@ class DBAgent:
         Inserisce o aggiorna la configurazione di un tool nella tabella tools.
         
         Args:
-            tool: Dizionario con 'nome_tool' e 'configurazione'.
-                  Formato: {"nome_tool": "Wikipedia", "configurazione": {"lang": "en", ...}}
+            tool: Dizionario con 'nome_tool', 'configurazione' e opzionalmente 'attivo'.
+                  Formato: {"nome_tool": "Wikipedia", "configurazione": {"lang": "en", ...}, "attivo": True}
         """
         if not tool or "nome_tool" not in tool:
             raise ValueError("Il dizionario tool deve contenere almeno 'nome_tool'")
@@ -189,6 +192,7 @@ class DBAgent:
         
         nome_tool = tool["nome_tool"]
         configurazione = tool.get("configurazione", {})
+        attivo = 1 if tool.get("attivo", True) else 0
         
         # Verifica se il tool esiste già
         cls._cursor.execute("SELECT nome_tool FROM tools WHERE nome_tool = ?", (nome_tool,))
@@ -199,16 +203,16 @@ class DBAgent:
         if exists:
             # Aggiorna
             cls._cursor.execute("""
-                UPDATE tools 
-                SET configurazione = ?, data_modifica = ?
+                UPDATE tools
+                SET configurazione = ?, attivo = ?, data_modifica = ?
                 WHERE nome_tool = ?
-            """, (json.dumps(configurazione), now, nome_tool))
+            """, (json.dumps(configurazione), attivo, now, nome_tool))
         else:
             # Inserisci
             cls._cursor.execute("""
-                INSERT INTO tools (nome_tool, configurazione, data_creazione, data_modifica)
-                VALUES (?, ?, ?, ?)
-            """, (nome_tool, json.dumps(configurazione), now, now))
+                INSERT INTO tools (nome_tool, configurazione, attivo, data_creazione, data_modifica)
+                VALUES (?, ?, ?, ?, ?)
+            """, (nome_tool, json.dumps(configurazione), attivo, now, now))
         
         cls._conn.commit()
 
@@ -242,12 +246,38 @@ class DBAgent:
         
         Returns:
             Lista di dizionari con la configurazione di ogni tool.
+            Formato: [{"nome_tool": "Wikipedia", "configurazione": {"lang": "en", ...}, "attivo": True}, ...]
+        """
+        cls.crea_schema()
+        cls._get_connection()
+        
+        cls._cursor.execute("SELECT nome_tool, configurazione, attivo FROM tools")
+        rows = cls._cursor.fetchall()
+        
+        tools = []
+        for row in rows:
+            tools.append({
+                "nome_tool": row["nome_tool"],
+                "configurazione": json.loads(row["configurazione"]),
+                "attivo": bool(row["attivo"])
+            })
+        
+        # conn.close()
+        return tools
+    
+    @classmethod
+    def carica_tools_attivi(cls) -> list[dict]:
+        """
+        Carica solo i tools attivi dal database.
+        
+        Returns:
+            Lista di dizionari con la configurazione dei tools attivi.
             Formato: [{"nome_tool": "Wikipedia", "configurazione": {"lang": "en", ...}}, ...]
         """
         cls.crea_schema()
         cls._get_connection()
         
-        cls._cursor.execute("SELECT nome_tool, configurazione FROM tools")
+        cls._cursor.execute("SELECT nome_tool, configurazione FROM tools WHERE attivo = 1")
         rows = cls._cursor.fetchall()
         
         tools = []
@@ -259,6 +289,63 @@ class DBAgent:
         
         # conn.close()
         return tools
+    
+    @classmethod
+    def aggiorna_stato_tool(cls, nome_tool: str, attivo: bool):
+        """
+        Aggiorna solo lo stato attivo/inattivo di un tool.
+        
+        Args:
+            nome_tool: Nome del tool da aggiornare.
+            attivo: True per attivare, False per disattivare.
+        """
+        cls.crea_schema()
+        cls._get_connection()
+        
+        cls._cursor.execute(
+            "UPDATE tools SET attivo = ?, data_modifica = ? WHERE nome_tool = ?",
+            (1 if attivo else 0, datetime.now().isoformat(), nome_tool)
+        )
+        cls._conn.commit()
+    
+    @classmethod
+    def aggiorna_stati_tools(cls, tools_attivi: list[str]):
+        """
+        Aggiorna lo stato di tutti i tools in base alla lista fornita.
+        I tools nella lista vengono attivati, gli altri disattivati.
+        Se un tool selezionato non esiste nel DB, viene creato con configurazione vuota.
+        
+        Args:
+            tools_attivi: Lista dei nomi dei tools da attivare.
+        """
+        cls.crea_schema()
+        cls._get_connection()
+        
+        # Disattiva tutti i tools esistenti
+        cls._cursor.execute("UPDATE tools SET attivo = 0")
+        
+        # Per ogni tool da attivare
+        if tools_attivi:
+            now = datetime.now().isoformat()
+            for tool_name in tools_attivi:
+                # Verifica se il tool esiste già
+                cls._cursor.execute("SELECT nome_tool FROM tools WHERE nome_tool = ?", (tool_name,))
+                exists = cls._cursor.fetchone()
+                
+                if exists:
+                    # Aggiorna solo lo stato
+                    cls._cursor.execute(
+                        "UPDATE tools SET attivo = 1 WHERE nome_tool = ?",
+                        (tool_name,)
+                    )
+                else:
+                    # Crea un nuovo record con configurazione vuota
+                    cls._cursor.execute("""
+                        INSERT INTO tools (nome_tool, configurazione, attivo, data_creazione, data_modifica)
+                        VALUES (?, ?, 1, ?, ?)
+                    """, (tool_name, json.dumps({}), now, now))
+        
+        cls._conn.commit()
     
     @staticmethod
     def _is_port_in_use(host: str, port: int) -> bool:

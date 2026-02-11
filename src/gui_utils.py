@@ -194,11 +194,31 @@ def salva_configurazione(providers: dict[str, Provider]):
 # ──────────────────────────────────────────────────────────────────────────────
 # Dialog configurazione tools per agent
 # ──────────────────────────────────────────────────────────────────────────────
+def _on_close_tools_dialog():
+    """
+    Callback chiamato quando la dialog dei tools viene chiusa.
+    Aggiorna il DB con le selezioni fatte nel multiselect.
+    """
+    st.session_state["tools_dialog_open"] = False
+    
+    # Aggiorna il DB solo se ci sono modifiche
+    if "tools_selezionati_temp" in st.session_state:
+        tools_selezionati = st.session_state["tools_selezionati_temp"]
+        DBAgent.aggiorna_stati_tools(tools_selezionati)
+        # Ricarica i tools solo nel provider corrente
+        provider_corrente = st.session_state.get("provider_corrente_dialog")
+        _carica_tools_nei_provider(provider_name=provider_corrente)
+        # Pulisci lo stato temporaneo
+        del st.session_state["tools_selezionati_temp"]
+        if "provider_corrente_dialog" in st.session_state:
+            del st.session_state["provider_corrente_dialog"]
+
+
 @st.dialog(
     "⚙️ Configurazione Tools per Agent",
     width="large",
     dismissible=True,
-    on_dismiss=lambda: st.session_state.update({"tools_dialog_open":False})
+    on_dismiss=lambda: _on_close_tools_dialog()
 )
 def mostra_dialog_tools_agent():
     """
@@ -247,14 +267,8 @@ def mostra_dialog_tools_agent():
             # Container scrollabile per la lista
             with st.container(height=400):
                 for tool_name in sorted(filtered_tools):
-                    is_configured = tool_name in tools_salvati_dict
-                    
-                    # Crea un pulsante cliccabile per ogni tool
-                    # Usa un emoji per indicare se è configurato
-                    label = f"{'✅' if is_configured else '⚪'} {tool_name}"
-                    
                     # Pulsante che seleziona il tool quando cliccato
-                    if st.button(label, key=f"select_btn_{tool_name}", use_container_width=True):
+                    if st.button(tool_name, key=f"select_btn_{tool_name}", use_container_width=True):
                         st.session_state["selected_tool_for_config"] = tool_name
                         # Carica la configurazione esistente se presente
                         if tool_name in tools_salvati_dict:
@@ -262,6 +276,31 @@ def mostra_dialog_tools_agent():
                         else:
                             st.session_state["tool_config_temp"] = {}
                         st.rerun()
+        
+        # Multiselect per selezionare tools attivi (dopo le colonne)
+        st.divider()
+        st.subheader("🔧 Selezione Tools Attivi")
+        
+        # Ottieni tutti i tools disponibili dal loader
+        tutti_tools_disponibili = list(tools_instances.keys())
+        
+        # Ottieni i tools attivi dal DB
+        tools_attivi_db = [t["nome_tool"] for t in tools_salvati if t.get("attivo", True)]
+        
+        # Inizializza lo stato se non esiste
+        if "tools_selezionati_temp" not in st.session_state:
+            st.session_state["tools_selezionati_temp"] = tools_attivi_db
+        
+        tools_selezionati = st.multiselect(
+            "Seleziona quali tools vuoi rendere attivi",
+            options=sorted(tutti_tools_disponibili),
+            default=st.session_state["tools_selezionati_temp"],
+            key="tools_attivi_multiselect",
+            help="Solo i tools selezionati saranno disponibili per l'utilizzo in modalità agentica"
+        )
+        
+        # Salva la selezione corrente nel session state (senza rerun)
+        st.session_state["tools_selezionati_temp"] = tools_selezionati
         
         with col_right:
             st.subheader("🔧 Configurazione Tool")
@@ -477,7 +516,15 @@ def mostra_dialog_tools_agent():
                 if st.session_state.get("confirm_delete_agent_db", False):
                     try:
                         DBAgent.elimina_db()
-                        st.success("✅ Database eliminato!")
+                        # Svuota i tools da tutti i provider
+                        providers = st.session_state.get("providers", {})
+                        for provider in providers.values():
+                            provider.set_tools([])
+                            try:
+                                provider._crea_agent()
+                            except:
+                                pass  # Ignora errori durante la ricreazione dell'agent
+                        st.success("✅ Database eliminato e tools rimossi dai provider!")
                         st.session_state["confirm_delete_agent_db"] = False
                         st.rerun()
                     except Exception as e:
@@ -505,19 +552,17 @@ def mostra_dialog_tools_agent():
     
     # Pulsante chiudi (fuori dalle tab, sempre visibile)
     if st.button("✅ Chiudi", type="primary", use_container_width=True):
-        # Carica i tools configurati nei provider prima di chiudere
-        _carica_tools_nei_provider()
-        
-        st.session_state["tools_dialog_open"] = False
-        st.session_state["selected_tool_for_config"] = None
-        st.session_state["tool_config_temp"] = {}
+        # Chiama la stessa funzione del callback on_dismiss
+        _on_close_tools_dialog()
         st.rerun()
 
-def _carica_tools_nei_provider():
+def _carica_tools_nei_provider(provider_name: str | None = None):
     """
-    Carica i tools configurati in tutti i provider e crea l'agent.
-    Questo prepara tutti i provider ad usare i tools quando la modalità agentica viene attivata.
-    Questa funzione viene chiamata quando si chiude la dialog di configurazione tools.
+    Carica i tools configurati nei provider e crea l'agent.
+    
+    Args:
+        provider_name: Nome del provider in cui caricare i tools.
+                      Se None, carica in tutti i provider.
     
     Returns:
         dict: Dizionario con 'success' (bool), 'tools_count' (int), 'providers_count' (int), 'errors' (list)
@@ -529,8 +574,8 @@ def _carica_tools_nei_provider():
         'errors': []
     }
     
-    # Ottieni i tools configurati dal database
-    tools_config = DBAgent.carica_tools()
+    # Ottieni solo i tools attivi dal database
+    tools_config = DBAgent.carica_tools_attivi()
     if not tools_config:
         return risultato
     
@@ -543,25 +588,41 @@ def _carica_tools_nei_provider():
     tools_to_use = []
     for tool_dict in tools_config:
         tool_name = tool_dict.get("nome_tool")
+        
         if tool_name in all_tools_instances:
             tool_instance = all_tools_instances[tool_name]
             # Ottieni i tools effettivi chiamando get_tool()
-            tools = tool_instance.get_tool()
-            if isinstance(tools, list):
-                tools_to_use.extend(tools)
-            else:
-                tools_to_use.append(tools)
+            # Alcuni tools non richiedono configurazione, altri sì
+            # Se get_tool() fallisce, l'errore viene catturato e registrato
+            try:
+                tools = tool_instance.get_tool()
+                if isinstance(tools, list):
+                    tools_to_use.extend(tools)
+                else:
+                    tools_to_use.append(tools)
+            except Exception as e:
+                # Tool richiede configurazione o ha altri problemi
+                # L'errore viene registrato ma non blocca il caricamento degli altri tools
+                risultato['errors'].append(f"{tool_name}: {str(e)}")
     
     if not tools_to_use:
         return risultato
     
-    # Passa i tools a TUTTI i provider e crea l'agent (così è pronto quando serve)
+    # Passa i tools ai provider specificati
     providers = st.session_state.get("providers", {})
     providers_aggiornati = 0
     
-    for provider in providers.values():
+    # Determina quali provider aggiornare
+    if provider_name:
+        # Carica solo nel provider specificato
+        providers_to_update = {provider_name: providers[provider_name]} if provider_name in providers else {}
+    else:
+        # Carica in tutti i provider
+        providers_to_update = providers
+    
+    for provider in providers_to_update.values():
         provider.set_tools(tools_to_use)
-        # Crea l'agent per includere i tools (anche se modalità agentica non è ancora attiva)
+        # Crea l'agent per includere i tools
         try:
             provider._crea_agent()
             providers_aggiornati += 1
@@ -754,45 +815,53 @@ def crea_sidebar(providers: dict[str, Provider]):
             
         # Sezione Modalità Agentica
         with st.expander("🤖 Modalità Agentica", expanded=bool(st.session_state[provider_scelto][agentic_key])):
+            # Callback per il toggle della modalità agentica
+            def on_toggle_agentic():
+                # Sincronizza il valore del toggle
+                sincronizza_sessione(agentic_key)
+                # Ricarica i tools attivi solo nel provider corrente
+                _carica_tools_nei_provider(provider_name=provider_scelto)
+            
             # Toggle Modalità agentica
             modalita_agentica = st.toggle("Abilita Modalità Agentica", value=st.session_state[provider_scelto][agentic_key],
-                       key=agentic_key, on_change=sincronizza_sessione, args=(agentic_key,))
+                       key=agentic_key, on_change=on_toggle_agentic)
             
-            if modalita_agentica:
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Pulsante per configurare i tools
-                    if st.button("⚙️ Configura Tools", key="btn_config_tools", use_container_width=True):
-                        st.session_state["tools_dialog_open"] = True
-                
-                with col2:
-                    # Link per gestione avanzata DB agent.db (server avviato automaticamente all'inizializzazione)
-                    if DBAgent.is_sqlite_web_active():
-                        url = DBAgent.get_sqlite_web_url()
-                        st.markdown(
-                            f'<a href="{url}" target="_blank">'
-                            '<button style="width:100%; padding:8px; font-size:1rem;">'
-                            '🔍 Gestione avanzata DB'
-                            '</button></a>',
-                            unsafe_allow_html=True
-                        )
-                    else:
-                        st.markdown(
-                            '<button style="width:100%; padding:8px; font-size:1rem; opacity:0.5;" disabled>'
-                            '🔍 Server DB non disponibile'
-                            '</button>',
-                            unsafe_allow_html=True
-                        )
-                
-                # Mostra info sui tools configurati
-                tools_config = DBAgent.carica_tools()
-                if tools_config:                    
-                    with st.expander("📋 Tools configurati", expanded=False):
-                        for tool in tools_config:
-                            st.write(f"• **{tool['nome_tool']}**")
+            # Widgets sempre visibili (non più condizionati da modalita_agentica)
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Pulsante per configurare i tools
+                if st.button("⚙️ Configura Tools", key="btn_config_tools", use_container_width=True):
+                    st.session_state["tools_dialog_open"] = True
+                    st.session_state["provider_corrente_dialog"] = provider_scelto
+            
+            with col2:
+                # Link per gestione avanzata DB agent.db (server avviato automaticamente all'inizializzazione)
+                if DBAgent.is_sqlite_web_active():
+                    url = DBAgent.get_sqlite_web_url()
+                    st.markdown(
+                        f'<a href="{url}" target="_blank">'
+                        '<button style="width:100%; padding:8px; font-size:1rem;">'
+                        '🔍 Gestione avanzata DB'
+                        '</button></a>',
+                        unsafe_allow_html=True
+                    )
                 else:
-                    st.info("ℹ️ Nessun tool configurato. Clicca su 'Configura Tools' per iniziare.")
+                    st.markdown(
+                        '<button style="width:100%; padding:8px; font-size:1rem; opacity:0.5;" disabled>'
+                        '🔍 Server DB non disponibile'
+                        '</button>',
+                        unsafe_allow_html=True
+                    )
+            
+            # Mostra info sui tools attivi
+            tools_attivi = DBAgent.carica_tools_attivi()
+            if tools_attivi:
+                with st.expander("📋 Dettagli tools attivi", expanded=False):
+                    for tool in tools_attivi:
+                        st.write(f"• **{tool['nome_tool']}**")
+            else:
+                st.info("ℹ️ Nessun tool attivo. Configura e attiva i tools dalla finestra di configurazione.")
             
         # Sezione RAG
         with st.expander("🔎 RAG", expanded=bool(st.session_state[provider_scelto][rag_enabled_key])):
