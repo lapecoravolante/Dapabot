@@ -576,39 +576,37 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
     
     # Ottieni solo i tools attivi dal database
     tools_config = DBAgent.carica_tools_attivi()
-    if not tools_config:
-        return risultato
-    
-    # Ottieni le istanze dei tools già caricate
-    all_tools_instances = st.session_state.get("tools_instances", {})
-    if not all_tools_instances:
-        return risultato
     
     # Prepara la lista dei tools da passare ai provider
     tools_to_use = []
-    for tool_dict in tools_config:
-        tool_name = tool_dict.get("nome_tool")
+    
+    # Se ci sono tools attivi, caricali
+    if tools_config:
+        # Ottieni le istanze dei tools già caricate
+        all_tools_instances = st.session_state.get("tools_instances", {})
+        if not all_tools_instances:
+            return risultato
         
-        if tool_name in all_tools_instances:
-            tool_instance = all_tools_instances[tool_name]
-            # Ottieni i tools effettivi chiamando get_tool()
-            # Alcuni tools non richiedono configurazione, altri sì
-            # Se get_tool() fallisce, l'errore viene catturato e registrato
-            try:
-                tools = tool_instance.get_tool()
-                if isinstance(tools, list):
-                    tools_to_use.extend(tools)
-                else:
-                    tools_to_use.append(tools)
-            except Exception as e:
-                # Tool richiede configurazione o ha altri problemi
-                # L'errore viene registrato ma non blocca il caricamento degli altri tools
-                risultato['errors'].append(f"{tool_name}: {str(e)}")
+        for tool_dict in tools_config:
+            tool_name = tool_dict.get("nome_tool")
+            
+            if tool_name in all_tools_instances:
+                tool_instance = all_tools_instances[tool_name]
+                # Ottieni i tools effettivi chiamando get_tool()
+                # Alcuni tools non richiedono configurazione, altri sì
+                # Se get_tool() fallisce, l'errore viene catturato e registrato
+                try:
+                    tools = tool_instance.get_tool()
+                    if isinstance(tools, list):
+                        tools_to_use.extend(tools)
+                    else:
+                        tools_to_use.append(tools)
+                except Exception as e:
+                    # Tool richiede configurazione o ha altri problemi
+                    # L'errore viene registrato ma non blocca il caricamento degli altri tools
+                    risultato['errors'].append(f"{tool_name}: {str(e)}")
     
-    if not tools_to_use:
-        return risultato
-    
-    # Passa i tools ai provider specificati
+    # Passa i tools ai provider specificati (anche se la lista è vuota)
     providers = st.session_state.get("providers", {})
     providers_aggiornati = 0
     
@@ -621,8 +619,9 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
         providers_to_update = providers
     
     for provider in providers_to_update.values():
+        # Aggiorna sempre i tools, anche se la lista è vuota
         provider.set_tools(tools_to_use)
-        # Crea l'agent per includere i tools
+        # Crea sempre l'agent, anche senza tools (funzionerà come un chatbot normale)
         try:
             provider._crea_agent()
             providers_aggiornati += 1

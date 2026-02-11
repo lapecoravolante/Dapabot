@@ -4,10 +4,10 @@ import importlib.util
 
 class Tool(ABC):
 
-    def __init__(self, nome="", variabili_necessarie=None, pacchetti_pytthon_necessari=None, configurazione=None, parametri_iniziali=None) -> None:
+    def __init__(self, nome="", variabili_necessarie=None, pacchetti_python_necessari=None, configurazione=None, parametri_iniziali=None) -> None:
         self._nome = nome
         self._variabili_necessarie = variabili_necessarie if variabili_necessarie is not None else {}
-        self._pacchetti_pytthon_necessari = pacchetti_pytthon_necessari if pacchetti_pytthon_necessari is not None else []
+        self._pacchetti_python_necessari = pacchetti_python_necessari if pacchetti_python_necessari is not None else {}
         self._configurazione = configurazione if configurazione is not None else {}
         
         # Inizializza i parametri configurabili passati dalla sottoclasse
@@ -22,14 +22,14 @@ class Tool(ABC):
         """
         Installa i pacchetti python necessari per il corretto funzionamento del tool.
         Verifica prima se il pacchetto è già installato per evitare chiamate inutili a uv.
+        pacchetti_python_necessari può essere una lista o un dizionario {pacchetto: modulo}.
         """
-        for pacchetto in self._pacchetti_pytthon_necessari:
-            # Estrae il nome del modulo dal nome del pacchetto
-            # Es: "langchain-community" -> "langchain_community"
-            module_name = pacchetto.replace("-", "_")
-            
-            # Verifica se il pacchetto è già installato
-            if importlib.util.find_spec(module_name) is None:
+        for pacchetto, module_name in self._pacchetti_python_necessari.items():
+            # Verifica se il pacchetto è già installato provando a importarlo
+            try:
+                importlib.import_module(module_name)
+                # Pacchetto già installato, salta l'installazione
+            except ImportError:
                 # Pacchetto non installato, procedi con l'installazione
                 print(f"📦 Installazione pacchetto: {pacchetto}")
                 subprocess.run(["uv", "pip", "install", pacchetto])
@@ -44,8 +44,7 @@ class Tool(ABC):
         self._variabili_necessarie = variabili_necessarie
         # Imposta le variabili d'ambiente in os.environ solo se hanno un valore
         for variabile, valore in self._variabili_necessarie.items():
-            if valore:  # Solo se il valore non è vuoto
-                os.environ[variabile] = valore
+            os.environ[variabile] = valore
 
     def get_variabili_necessarie(self) -> dict[str, str]:
         return self._variabili_necessarie
@@ -53,11 +52,13 @@ class Tool(ABC):
     def set_configurazione(self, configurazione: dict) -> None:
         self._configurazione = configurazione
 
-    def set_pacchetti_pytthon_necessari(self, pacchetti_pytthon_necessari: list) -> None:
-        self._pacchetti_pytthon_necessari = pacchetti_pytthon_necessari
+    def set_pacchetti_python_necessari(self, pacchetti_python_necessari: dict) -> None:
+        """Imposta i pacchetti necessari come dizionario {pacchetto: modulo}."""
+        self._pacchetti_python_necessari = pacchetti_python_necessari
         
-    def get_pacchetti_pytthon_necessari(self) -> list:
-        return self._pacchetti_pytthon_necessari
+    def get_pacchetti_python_necessari(self) -> dict:
+        """Ritorna il dizionario dei pacchetti necessari {pacchetto: modulo}."""
+        return self._pacchetti_python_necessari
 
     # ritorna la configurazione per la GUI e per il DB
     def get_configurazione(self) -> dict:

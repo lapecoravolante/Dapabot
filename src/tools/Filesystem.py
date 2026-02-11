@@ -7,7 +7,9 @@ class Filesystem(Tool):
         # I parametri iniziali vengono impostati dalla classe base come attributi dell'oggetto
         super().__init__(
             nome="Filesystem",
-            pacchetti_pytthon_necessari=["langchain-community"],
+            pacchetti_python_necessari={
+                "langchain-community": "langchain_community"
+            },
             parametri_iniziali={
                 "root_dir": "",
                 "selected_tools": [tool.name for tool in FileManagementToolkit().get_tools()]

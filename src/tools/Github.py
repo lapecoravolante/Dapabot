@@ -4,11 +4,14 @@ from langchain_community.utilities.github import GitHubAPIWrapper
 
 class Github(Tool):
 
-    def __init__(self) -> None:        
+    def __init__(self) -> None:
         # I parametri iniziali vengono impostati dalla classe base come attributi dell'oggetto
         super().__init__(
             nome="Github",
-            pacchetti_pytthon_necessari=["langchain-community", "pygithub"],
+            pacchetti_python_necessari={
+                "langchain-community": "langchain_community",
+                "pygithub": "github"
+            },
             variabili_necessarie={
                 "LANGSMITH_API_KEY": "",
                 "LANGSMITH_TRACING":"",

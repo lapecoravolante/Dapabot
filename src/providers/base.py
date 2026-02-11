@@ -172,7 +172,7 @@ class Provider(ABC):
         cls._tools = tools
     
     def _crea_agent(self):
-        """Crea l'agent ReAct con il nuovo API (graph-based)."""
+        """Crea l'agent """
         if not self._client:
             raise Exception("Client LLM non inizializzato.")
         try:
@@ -297,10 +297,16 @@ class Provider(ABC):
             prompt = ChatPromptTemplate.from_messages([*cronologia_completa])
             
             if self._modalita_agentica:
+                # Verifica che l'agent sia stato creato
+                if not self._agent:
+                    raise Exception("Agent non inizializzato. Impossibile procedere in modalità agentica.")
+                
                 if status_container:
-                    # Mostra sempre il numero di tools disponibili
-                    if self._tools:
-                        status_container.write(f"🔧 {len(self._tools)} tools disponibili")
+                    # Mostra il numero di tools disponibili
+                    if Provider._tools:
+                        status_container.write(f"🔧 {len(Provider._tools)} tools disponibili")
+                    else:
+                        status_container.write("⚠️ Nessun tool configurato (modalità chatbot)")
                     
                     status_container.write("🧠 Analisi del problema in corso...")
                 
