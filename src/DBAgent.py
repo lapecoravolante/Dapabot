@@ -1,6 +1,5 @@
 import sqlite3, json, os, inspect, subprocess, socket
 from datetime import datetime
-from typing import Dict, List, Any, Optional
 from pathlib import Path
 
 
@@ -34,7 +33,7 @@ class DBAgent:
             cls._cursor = cls._conn.cursor()
 
     @classmethod
-    def crea_schema(cls, configurazione: Dict = {}):
+    def crea_schema(cls, configurazione: dict = {}):
         """
         Crea lo schema del database.
         
@@ -65,7 +64,7 @@ class DBAgent:
         # conn.close() # Non chiudiamo la connessione persistente
     
     @classmethod
-    def salva_db(cls, configurazione: Dict = {}):
+    def salva_db(cls, configurazione: dict = {}):
         """
         Salva la configurazione completa su database.
         Se la configurazione è vuota, esegue la truncate di tutte le tabelle.
@@ -174,7 +173,7 @@ class DBAgent:
             raise Exception(f"Errore nell'eliminazione del database: {e}")
     
     @classmethod
-    def salva_tool(cls, tool: Dict = {}):
+    def salva_tool(cls, tool: dict = {}):
         """
         Inserisce o aggiorna la configurazione di un tool nella tabella tools.
         
@@ -216,7 +215,7 @@ class DBAgent:
         # conn.close()
     
     @classmethod
-    def cancella_tool(cls, tool: Dict = {}):
+    def cancella_tool(cls, tool: dict = {}):
         """
         Cancella la configurazione di un tool dal database.
         
@@ -237,7 +236,7 @@ class DBAgent:
         # conn.close()
     
     @classmethod
-    def carica_tools(cls) -> List[Dict]:
+    def carica_tools(cls) -> list[dict]:
         """
         Carica tutti i tools configurati dal database.
         

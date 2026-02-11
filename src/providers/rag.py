@@ -6,7 +6,6 @@ from langchain_chroma import Chroma
 from src.Messaggio import Messaggio
 from src.Allegato import Allegato
 import os, logging, hashlib, json, shutil, gc, time
-from typing import Dict, Tuple
 
 class Rag():
 
@@ -19,9 +18,9 @@ class Rag():
     DEFAULT_VECTORSTORE_INDEX_FILE_PATH = os.path.join(DEFAULT_VECTORSTORE_PATH, DEFAULT_VECTORSTORE_INDEX_FILE)
     AVAILABLE_SEARCH_MODALITIES=["similarity", "mmr"]    
     # cache dei vectorstore per file già elaborati
-    _cache_vectorstores: Dict[Tuple, Chroma] = {}
+    _cache_vectorstores: dict[tuple, Chroma] = {}
     # indice su disco della cache dei vectorstore
-    _indice_vectorstores: Dict[Tuple, Dict[str, str]] = {}
+    _indice_vectorstores: dict[tuple, dict[str, str]] = {}
 
     _pulizia_fatta = False  # esegue la pulizia solo una volta per processo
 
@@ -209,7 +208,7 @@ class Rag():
         return clean_splits
 
     @staticmethod
-    def _genera_nome_collezione(vectorstore_id: Tuple) -> str:
+    def _genera_nome_collezione(vectorstore_id: tuple) -> str:
         """
         Genera un nome di collection a partire dal vectorstore_id.
         Il parametro "salt" serve per non generare mai lo stesso nome per lo stesso file.
@@ -229,7 +228,7 @@ class Rag():
         salt = time.time_ns()
         return "rag_" + hashlib.sha256(f"{vectorstore_id}-{salt}".encode()).hexdigest()
 
-    def _get_vectorstore(self, vectorstore_id: Tuple, path: str, tipo: str) -> Chroma:
+    def _get_vectorstore(self, vectorstore_id: tuple, path: str, tipo: str) -> Chroma:
         """
         Recupera (o crea) il vectorstore della collection usando una cartella
         di persistenza dedicata: <persist_dir>/<collection_name>/.

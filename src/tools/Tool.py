@@ -32,10 +32,7 @@ class Tool(ABC):
             if importlib.util.find_spec(module_name) is None:
                 # Pacchetto non installato, procedi con l'installazione
                 print(f"📦 Installazione pacchetto: {pacchetto}")
-                subprocess.run(["uv", "add", pacchetto])
-            else:
-                # Pacchetto già installato, salta l'installazione
-                print(f"✅ Pacchetto già installato: {pacchetto}")
+                subprocess.run(["uv", "pip", "install", pacchetto])
             
     def set_nome(self, nome: str) -> None:
         self._nome = nome

@@ -15,7 +15,7 @@ class Loader():
             # importa tutti i moduli del package providers
             if not Loader._caricamento_effettuato:
                 for _, module_name, _ in pkgutil.iter_modules(src.providers.__path__):
-                    if module_name in ("base", "loader", "rag"):
+                    if module_name in ("base", "loader", "rag", "StoricoChat"):
                         continue
                     importlib.import_module(f"{src.providers.__name__}.{module_name}")
                 Loader._caricamento_effettuato=True

@@ -1,5 +1,4 @@
 from src.tools.Tool import Tool
-from typing import List
 from langchain_community.agent_toolkits import FileManagementToolkit
 
 class Filesystem(Tool):

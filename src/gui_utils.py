@@ -1,145 +1,190 @@
 import streamlit as st
 import extra_streamlit_components as stx
-from typing import Dict
 from datetime import datetime
 from src.Messaggio import Messaggio
 from src.Configurazione import Configurazione
 from src.providers.loader import Loader
 from src.providers.base import Provider
 from src.providers.rag import Rag
-from src.StoricoChat import StoricoChat
+from src.providers.StoricoChat import StoricoChat
 from src.DBAgent import DBAgent
 from src.tools.loader import Loader as tools_loader
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Bootstrap iniziale
 # ──────────────────────────────────────────────────────────────────────────────
+def _costruisci_chiavi_di_sessione(nome: str) -> dict:
+    """Costruisce le chiavi di sessione per un provider.
+    
+    Args:
+        nome: Nome del provider
+        
+    Returns:
+        Dizionario con le chiavi di sessione
+    """
+    return {
+        'apikey': f"api_key_{nome}",
+        'modello': f"modello_{nome}",
+        'agentic': f"modalita_agentica_{nome}",
+        'sysmsg': f"system_msg_{nome}",
+        'rag_enabled': f"rag_enabled_{nome}",
+        'rag_topk': f"rag_topk_{nome}",
+        'rag_model': f"rag_model_{nome}",
+        'rag_modalita': f"rag_modalita_ricerca_{nome}"
+    }
+
+
+def _get_provider_defaults(provider: Provider, chiavi: dict) -> dict:
+    """Recupera i valori di default per un provider.
+    
+    Considera nell'ordine:
+    - valore in sessione
+    - valore memorizzato nel provider
+    - valore nella configurazione
+    - valore di default
+    
+    Args:
+        provider: Istanza del provider
+        chiavi: Dizionario con le chiavi di sessione
+        
+    Returns:
+        Dizionario con i valori di default
+    """
+    conf = provider.to_dict()
+    rag_conf = conf.get(Configurazione.RAG_KEY, {})
+    rag = provider.get_rag()
+    
+    return {
+        chiavi['apikey']: st.session_state.get(chiavi['apikey']) or provider.get_apikey() or conf.get("api_key", provider.get_prefisso_token()),
+        chiavi['modello']: st.session_state.get(chiavi['modello']) or provider.get_modello_scelto() or conf.get("modello", ""),
+        chiavi['agentic']: st.session_state.get(chiavi['agentic']) or provider.get_modalita_agentica() or conf.get("agentic_mode", False),
+        chiavi['sysmsg']: st.session_state.get(chiavi['sysmsg'], ""),
+        chiavi['rag_enabled']: st.session_state.get(chiavi['rag_enabled']) or rag.get_attivo() or rag_conf.get("attivo", False),
+        chiavi['rag_topk']: st.session_state.get(chiavi['rag_topk']) or rag.get_topk() or rag_conf.get("top_k", Rag.DEFAULT_TOPK),
+        chiavi['rag_model']: st.session_state.get(chiavi['rag_model']) or rag.get_modello() or rag_conf.get("modello", Rag.DEFAULT_EMBEDDING_MODEL),
+        chiavi['rag_modalita']: st.session_state.get(chiavi['rag_modalita']) or rag.get_modalita_ricerca() or rag_conf.get("modalita_ricerca", Rag.AVAILABLE_SEARCH_MODALITIES[0])
+    }
+
+def _inizializza_tools():
+    """Inizializza e configura i tools disponibili.
+        I tools vengono caricati dinamicamente e 
+        popolati con le configurazioni prese dal DB
+    """
+    if "tools_instances" in st.session_state:
+        return
+        
+    st.session_state.tools_instances = tools_loader.discover_tools()
+    tools_salvati = DBAgent.carica_tools()
+    
+    for tool_config in tools_salvati:
+        nome_tool = tool_config["nome_tool"]
+        if nome_tool not in st.session_state.tools_instances:
+            continue
+            
+        instance = st.session_state.tools_instances[nome_tool]
+        configurazione = tool_config["configurazione"]
+        
+        for key, value in configurazione.items():
+            if key == "_variabili_necessarie":
+                instance.set_variabili_necessarie(value)
+            elif hasattr(instance, key):
+                setattr(instance, key, value)
+
+def _inizializza_provider(provider: Provider, modello_da_ripristinare: str = ""):
+    """Inizializza la configurazione di sessione per un singolo provider.
+    
+    Args:
+        provider: Istanza del provider
+        modello_da_ripristinare: Modello da ripristinare (opzionale)
+    """
+    nome = provider.nome()
+    chiavi = _costruisci_chiavi_di_sessione(nome)
+    
+    if nome not in st.session_state:
+        st.session_state[nome] = _get_provider_defaults(provider, chiavi)
+    
+    if modello_da_ripristinare:
+        st.session_state[nome][chiavi['modello']] = modello_da_ripristinare
+
 def inizializza():
+    """Bootstrap iniziale dell'applicazione."""
     # Avvia i server sqlite-web per i database
     StoricoChat.start_sqlite_web_server()  # porta 8080 per storico_chat.db
     DBAgent.start_sqlite_web_server()      # porta 8081 per agent.db
     
-    # Carica i tools disponibili e memorizza le istanze
-    if "tools_instances" not in st.session_state:
-        st.session_state.tools_instances = tools_loader.discover_tools()
-        
-        # Carica le configurazioni salvate e applicale alle istanze
-        tools_salvati = DBAgent.carica_tools()
-        for tool_config in tools_salvati:
-            nome_tool = tool_config["nome_tool"]
-            configurazione = tool_config["configurazione"]
-            
-            # Trova l'istanza corrispondente
-            if nome_tool in st.session_state.tools_instances:
-                instance = st.session_state.tools_instances[nome_tool]
-                # Applica la configurazione salvata all'istanza
-                for key, value in configurazione.items():
-                    if key == "_variabili_necessarie":
-                        # Gestisce le variabili d'ambiente
-                        instance.set_variabili_necessarie(value)
-                    elif hasattr(instance, key):
-                        setattr(instance, key, value)
-
+    # Inizializza tools
+    _inizializza_tools()
     
-    if "providers" not in st.session_state:  # carica i providers una sola volta
+    # Inizializza providers
+    if "providers" not in st.session_state:
         st.session_state.providers = Loader.discover_providers()
-    providers = st.session_state.providers  # shortcut
     
-    # Se non c'è ancora un provider selezionato nella sessione, seleziona il primo provider come predefinito
+    # Inizializza tabbar
     if "tabbar_key" not in st.session_state:
         st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"
-            
-    # verifico se bisogna ripristinare sulla gui una chat recente    
-    provider_da_ripristinare = modello_da_ripristinare = ""
-    if "ripristina_chat" in st.session_state and st.session_state["ripristina_chat"]:
-        provider_da_ripristinare, modello_da_ripristinare = st.session_state.get("ripristina_chat", ("", "")).split(" | ")
-        st.session_state["provider_da_ripristinare"]=provider_da_ripristinare
-        st.session_state["ripristina_chat"]=""
     
-    for nome, provider in providers.items():
-        conf = provider.to_dict()
-        rag_conf = conf.get(Configurazione.RAG_KEY, {})
-
-        apikey_key               = f"api_key_{nome}"
-        modello_key              = f"modello_{nome}"
-        agentic_key              = f"modalita_agentica_{nome}"
-        sysmsg_key               = f"system_msg_{nome}"
-        rag_enabled_key          = f"rag_enabled_{nome}"
-        rag_topk_key             = f"rag_topk_{nome}"
-        rag_model_key            = f"rag_model_{nome}"
-        rag_modalita_ricerca_key = f"rag_modalita_ricerca_{nome}"
-
-        # crea la variabile di sessione con le configurazioni del provider considerando nell'ordine:
-        # valore in sessione -> valore memorizzato nel provider -> valore nella configurazione -> valore di default
-        if nome not in st.session_state:
-            st.session_state[nome]={
-                apikey_key: st.session_state.get(apikey_key) or provider.get_apikey() or conf.get("api_key", provider.get_prefisso_token()),
-                modello_key: st.session_state.get(modello_key) or provider.get_modello_scelto() or conf.get("modello", ""),
-                agentic_key: st.session_state.get(agentic_key) or provider.get_modalita_agentica() or conf.get("agentic_mode", False),
-                sysmsg_key: st.session_state.get(sysmsg_key, ""),
-                rag_enabled_key: st.session_state.get(rag_enabled_key) or provider.get_rag().get_attivo() or rag_conf.get("attivo", False),
-                rag_topk_key: st.session_state.get(rag_topk_key) or provider.get_rag().get_topk() or rag_conf.get("top_k", Rag.DEFAULT_TOPK),
-                rag_model_key: st.session_state.get(rag_model_key) or provider.get_rag().get_modello() or rag_conf.get("modello", Rag.DEFAULT_EMBEDDING_MODEL),
-                rag_modalita_ricerca_key: st.session_state.get(rag_modalita_ricerca_key) or provider.get_rag().get_modalita_ricerca() or rag_conf.get("modalita_ricerca", Rag.AVAILABLE_SEARCH_MODALITIES[0])
-            }
-        if provider_da_ripristinare == nome:
-            st.session_state[nome][modello_key]=modello_da_ripristinare
-    return providers
+    # Gestisce ripristino chat
+    provider_da_ripristinare, modello_da_ripristinare = "", ""
+    if st.session_state.get("ripristina_chat"):
+        provider_da_ripristinare, modello_da_ripristinare = st.session_state["ripristina_chat"].split(" | ")
+        st.session_state["provider_da_ripristinare"] = provider_da_ripristinare
+        st.session_state["ripristina_chat"] = ""
+    
+    # Inizializza ogni provider
+    for nome, provider in st.session_state.providers.items():
+        modello = modello_da_ripristinare if nome == provider_da_ripristinare else ""
+        _inizializza_provider(provider, modello)
+    
+    return st.session_state.providers
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Salvataggio configurazione (per TUTTI i provider) + aggiornamento runtime
 # ──────────────────────────────────────────────────────────────────────────────
-def salva_configurazione(providers: Dict[str, Provider]):
+def salva_configurazione(providers: dict[str, Provider]):
     """
     Salva la configurazione di TUTTI i provider leggendo nell'ordine:
     valore in sessione -> valore memorizzato nel provider -> valore nella configurazione -> valore di default
     """
     configurazioni = []
     for nome, provider in providers.items():
-        conf   = provider.to_dict()
+        chiavi = _costruisci_chiavi_di_sessione(nome)
+        defaults = _get_provider_defaults(provider, chiavi)
+        
+        # Recupera valori aggiuntivi non gestiti da _get_provider_defaults
+        conf = provider.to_dict()
         rag_conf = conf.get(Configurazione.RAG_KEY, {})
-        # costruisco le chiavi da salvare
-        apikey_key               = f"api_key_{nome}"
-        modello_key              = f"modello_{nome}"
-        agentic_key              = f"agentic_mode_{nome}"
-        rag_enabled_key          = f"rag_enabled_{nome}"
-        rag_topk_key             = f"rag_topk_{nome}"
-        rag_model_key            = f"rag_model_{nome}"
-        rag_modalita_ricerca_key = f"rag_modalita_ricerca_{nome}"
+        directory_allegati = provider.get_rag().get_upload_dir() or rag_conf.get("directory_allegati", Rag.DEFAULT_UPLOAD_DIR)
         
-        # Prendo i valori da salvare
-        base_url=provider.get_baseurl()
-        api_key=st.session_state.get(apikey_key) or provider.get_apikey() or conf.get("api_key", provider.get_prefisso_token())
-        modello=st.session_state.get(modello_key) or provider.get_modello_scelto() or conf.get("modello", "")
-        modalita_agentica=st.session_state.get(agentic_key) or provider.get_modalita_agentica() or conf.get("modalita_agentica", False)
-        attivo=st.session_state.get(rag_enabled_key) or provider.get_rag().get_attivo() or rag_conf.get("attivo", False)
-        top_k=st.session_state.get(rag_topk_key) or provider.get_rag().get_topk() or rag_conf.get("top_k", Rag.DEFAULT_TOPK)
-        directory_allegati=provider.get_rag().get_upload_dir() or rag_conf.get("directory_allegati", Rag.DEFAULT_UPLOAD_DIR)
-        modalita_ricerca=st.session_state.get(rag_modalita_ricerca_key) or provider.get_rag().get_modalita_ricerca() or rag_conf.get("modalita_ricerca", Rag.AVAILABLE_SEARCH_MODALITIES[0])
-        modello_rag=st.session_state.get(rag_model_key) or provider.get_rag().get_modello() or rag_conf.get("modello", Rag.DEFAULT_EMBEDDING_MODEL)
-        
-        # aggiungo la configurazione alla lista di quelle da salvare
+        # Costruisce la configurazione da salvare
         configurazioni.append({
-                "nome": nome,
-                "base_url": base_url,
-                "api_key": api_key,
-                "modello": modello,
-                "modalita_agentica": modalita_agentica,
-                Configurazione.RAG_KEY: {
-                    "attivo": attivo,
-                    "modello": modello_rag,
-                    "top_k": top_k,
-                    "directory_allegati": directory_allegati,
-                    "modalita_ricerca": modalita_ricerca
-                }
-            })
-        try: # rifletto immediatamente la configurazione sul provider
-            provider.set_modello_scelto(modello=modello, autoload_chat_db=st.session_state["autoload_chat_db"])
-            provider.set_apikey(api_key=api_key)
-            provider.set_rag(attivo=attivo, topk=top_k, modello=modello_rag, modalita_ricerca=modalita_ricerca)
+            "nome": nome,
+            "base_url": provider.get_baseurl(),
+            "api_key": defaults[chiavi['apikey']],
+            "modello": defaults[chiavi['modello']],
+            "modalita_agentica": defaults[chiavi['agentic']],
+            Configurazione.RAG_KEY: {
+                "attivo": defaults[chiavi['rag_enabled']],
+                "modello": defaults[chiavi['rag_model']],
+                "top_k": defaults[chiavi['rag_topk']],
+                "directory_allegati": directory_allegati,
+                "modalita_ricerca": defaults[chiavi['rag_modalita']]
+            }
+        })
+        
+        # Riflette immediatamente la configurazione sul provider
+        try:
+            provider.set_modello_scelto(modello=defaults[chiavi['modello']], autoload_chat_db=st.session_state["autoload_chat_db"])
+            provider.set_apikey(api_key=defaults[chiavi['apikey']])
+            provider.set_rag(
+                attivo=defaults[chiavi['rag_enabled']],
+                topk=defaults[chiavi['rag_topk']],
+                modello=defaults[chiavi['rag_model']],
+                modalita_ricerca=defaults[chiavi['rag_modalita']]
+            )
         except Exception:
-            pass # Non bloccare il salvataggio su errori runtime
-    # salvo su file
+            pass  # Non bloccare il salvataggio su errori runtime
+    
+    # Salva su file
     try:
         Configurazione.set(Configurazione.PROVIDERS_KEY, configurazioni)
         st.toast("Configurazione salvata ✅", icon="💾")
@@ -595,7 +640,7 @@ def mostra_dialog_vectorestores_globale():
 # ──────────────────────────────────────────────────────────────────────────────
 # Sidebar
 # ──────────────────────────────────────────────────────────────────────────────
-def crea_sidebar(providers: Dict[str, Provider]):
+def crea_sidebar(providers: dict[str, Provider]):
     st.logo(image="src/img/logo.png", size="large")
     
     with st.sidebar:
@@ -742,8 +787,7 @@ def crea_sidebar(providers: Dict[str, Provider]):
                 
                 # Mostra info sui tools configurati
                 tools_config = DBAgent.carica_tools()
-                if tools_config:
-                    st.caption(f"✅ {len(tools_config)} tool(s) configurato/i")
+                if tools_config:                    
                     with st.expander("📋 Tools configurati", expanded=False):
                         for tool in tools_config:
                             st.write(f"• **{tool['nome_tool']}**")
@@ -886,7 +930,7 @@ def crea_sidebar(providers: Dict[str, Provider]):
                         if cancella:
                             try:
                                 StoricoChat.cancella_chat(provider_scelto, modello_scelto)
-                                st.success("Chat cancellata dal disco", icon="✅")      
+                                st.success("Chat cancellata dal disco", icon="✅")
                             except Exception as e:
                                 st.exception(e)
                     with col4: # Cancella tutto il DB

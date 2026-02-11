@@ -3,13 +3,12 @@ from abc import ABC, abstractmethod
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.messages import HumanMessage, SystemMessage, AIMessage
 from langchain.agents import create_agent
-from typing import List, Tuple, Any
 from datetime import datetime
 from src.Messaggio import Messaggio
 from src.Allegato import Allegato
 from src.Configurazione import Configurazione
 from src.providers.rag import Rag
-from src.StoricoChat import StoricoChat
+from src.providers.StoricoChat import StoricoChat
 from src.DBAgent import DBAgent
 import base64, validators
 
@@ -53,7 +52,7 @@ class Provider(ABC):
         di HumanMessage, AIMessage,...) mentre m1 è un'istanza della classe Messaggio, usata per mostrare 
         il contenuto sulla GUI e per i salvataggi sul DB
     """
-    def _carica_cronologia_da_disco(self, modello) -> List[Tuple]:
+    def _carica_cronologia_da_disco(self, modello) -> list[tuple]:
         # ricostruisco la cronologia prendendo i messaggi dal disco e ricostruendo l'equivalente messaggio in formato Langchain
         messaggi_su_disco=StoricoChat.carica_cronologia(self._nome, modello)
         tuple_da_ritornare=[]
@@ -133,10 +132,12 @@ class Provider(ABC):
             self._agent = None
     
     def _carica_tools_da_db(self):
-        """Carica i tools configurati dal database e li imposta nel provider."""
-        from src.DBAgent import DBAgent
-        import streamlit as st
-        
+        """
+            Carica i tools configurati dal database e li imposta nel provider.
+            E' un fallback di sicurezza, questo codice viene già eseguito in
+            gui_utils.py nella funzione  "_inizializza_tools()"
+        """        
+
         tools_config = DBAgent.carica_tools()
         if not tools_config:
             return
@@ -160,7 +161,7 @@ class Provider(ABC):
             Provider.set_tools(tools_to_use)
     
     @classmethod
-    def set_tools(cls, tools: List[Any] = []):
+    def set_tools(cls, tools: list = []):
         """
         Imposta i tools da utilizzare con l'agent (metodo di classe).
         I tools sono condivisi tra tutti i provider.
@@ -371,7 +372,7 @@ class Provider(ABC):
     m1 è un'istanza della classe Messaggio, usata per mostrare il contenuto sulla GUI e per i salvataggi 
     sul DB. Questo metodo ritorna una lista di m1.
     """
-    def get_cronologia_messaggi(self, modello=None) -> List[Messaggio]: 
+    def get_cronologia_messaggi(self, modello=None) -> list[Messaggio]:
         modello = modello or self._modello_scelto
         if not modello or not self._cronologia_messaggi or not self._cronologia_messaggi[modello]:
             return []
@@ -395,7 +396,7 @@ class Provider(ABC):
         self._cronologia_messaggi[modello]=messaggi_su_disco+messaggi_da_aggiungere
     
     # ritorna la lista dei modelli che hanno almeno un messaggio in chat
-    def get_lista_modelli_con_chat(self) -> List[Messaggio]: 
+    def get_lista_modelli_con_chat(self) -> list[Messaggio]:
         return [modello for modello in self._cronologia_messaggi if self._cronologia_messaggi[modello]]
         
     @abstractmethod

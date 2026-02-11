@@ -1,11 +1,13 @@
 import sqlite3, os, json, subprocess, socket, base64
-from datetime import datetime
-from typing import List
 from uuid import uuid4
 from src.Messaggio import Messaggio
 from src.Allegato import Allegato
 
 class StoricoChat:
+    """
+    Gestisce la persistenza della cronologia delle chat su database SQLite.
+    """
+    
     nome_db: str = "storico_chat.db"
     _sqlite_web_process = None
     _sqlite_web_host = "127.0.0.1"
@@ -93,7 +95,7 @@ class StoricoChat:
         return contenuto if tipo.startswith("text")  else base64.b64encode(contenuto).decode("utf-8") 
 
     @classmethod
-    def salva_chat(cls, provider: str, modello: str, cronologia: List[Messaggio]):
+    def salva_chat(cls, provider: str, modello: str, cronologia: list[Messaggio]):
         cls._ensure_schema()
         conn = cls._get_connection()
         cursor = conn.cursor()
@@ -158,7 +160,7 @@ class StoricoChat:
         conn.close()
 
     @classmethod
-    def carica_cronologia(cls, provider: str, modello: str) -> List[Messaggio]:
+    def carica_cronologia(cls, provider: str, modello: str) -> list[Messaggio]:
         cls._ensure_schema()
         conn = cls._get_connection()
         cursor = conn.cursor()
@@ -344,3 +346,6 @@ class StoricoChat:
     @classmethod
     def get_sqlite_web_url(cls) -> str:
         return f"http://{cls._sqlite_web_host}:{cls._sqlite_web_port}/"
+
+
+# Made with Bob
