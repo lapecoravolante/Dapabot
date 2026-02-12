@@ -228,7 +228,6 @@ def _on_close_tools_dialog():
         if "provider_corrente_dialog" in st.session_state:
             del st.session_state["provider_corrente_dialog"]
 
-
 @st.dialog(
     "⚙️ Configurazione Tools per Agent",
     width="large",
@@ -591,9 +590,6 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
     
     # Ottieni solo i tools attivi dal database
     tools_config = DBAgent.carica_tools_attivi()
-    print(f"🔍 DEBUG: tools_config caricati dal DB: {len(tools_config)} tool attivi")
-    for tc in tools_config:
-        print(f"  - {tc.get('nome_tool')}")
     
     # Prepara la lista dei tools da passare ai provider
     tools_to_use = []
@@ -602,9 +598,7 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
     if tools_config:
         # Ottieni le istanze dei tools già caricate
         all_tools_instances = st.session_state.get("tools_instances", {})
-        print(f"🔍 DEBUG: tools_instances in session_state: {list(all_tools_instances.keys()) if all_tools_instances else 'NESSUNO'}")
         if not all_tools_instances:
-            print("⚠️ DEBUG: Nessuna istanza di tool trovata in session_state!")
             return risultato
         
         for tool_dict in tools_config:
@@ -626,15 +620,13 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
                 # Se get_tool() fallisce, l'errore viene catturato e registrato
                 try:
                     tools = tool_instance.get_tool() # torna una lista di tools
-                    print(f"✅ DEBUG: Tool {tool_name} caricato con successo: {len(tools)} tool(s)")
                     tools_to_use.extend(tools)
                 except Exception as e:
                     # Tool richiede configurazione o ha altri problemi
                     # L'errore viene registrato ma non blocca il caricamento degli altri tools
-                    print(f"❌ DEBUG: Errore caricamento tool {tool_name}: {str(e)}")
-                    risultato['errors'].append(f"{tool_name}: {str(e)}")
-   
-    print(f"🔍 DEBUG: Totale tools da passare ai provider: {len(tools_to_use)}")
+                    error_msg = f"Errore caricamento tool {tool_name}: {str(e)}"
+                    risultato['errors'].append(error_msg)
+                    st.toast(f"⚠️ {error_msg}", icon="⚠️")
     
     # Passa i tools ai provider specificati (anche se la lista è vuota)
     providers = st.session_state.get("providers", {})
@@ -650,24 +642,18 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
     
     for provider in providers_to_update.values():
         # Aggiorna sempre i tools, anche se la lista è vuota
-        print(f"🔧 DEBUG: Impostando {len(tools_to_use)} tool(s) nel provider {provider.nome()}")
         provider.set_tools(tools_to_use)
-        print(f"🔧 DEBUG: provider._tools dopo set_tools: {len(provider._tools) if provider._tools else 0} tool(s)")
         # Crea sempre l'agent, anche senza tools (funzionerà come un chatbot normale)
         try:
             provider._crea_agent()
-            print(f"✅ DEBUG: Agent creato con successo per {provider.nome()}")
             providers_aggiornati += 1
         except Exception as e:
-            print(f"❌ DEBUG: Errore creazione agent per {provider.nome()}: {str(e)}")
             risultato['errors'].append(f"{provider.nome()}: {str(e)}")
     
     # Prepara il risultato
     risultato['success'] = providers_aggiornati > 0
     risultato['tools_count'] = len(tools_to_use)
     risultato['providers_count'] = providers_aggiornati
-    
-    print(f"📊 DEBUG: Risultato finale - success: {risultato['success']}, tools: {risultato['tools_count']}, providers: {risultato['providers_count']}, errors: {len(risultato['errors'])}")
     
     return risultato
 

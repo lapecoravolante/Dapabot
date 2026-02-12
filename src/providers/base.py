@@ -136,17 +136,13 @@ class Provider(ABC):
         Args:
             tools: Lista di istanze di tools di LangChain.
         """
-        print(f"🔧 DEBUG set_tools: Ricevuti {len(tools)} tool(s) per {self._nome}")
-        print(f"🔧 DEBUG set_tools: self._tools PRIMA: {len(self._tools) if self._tools else 0}")
         self._tools = tools
-        print(f"🔧 DEBUG set_tools: self._tools DOPO: {len(self._tools) if self._tools else 0}")
     
     def _crea_agent(self):
         """Crea l'agent """
         if not self._client:
             raise Exception("Client LLM non inizializzato.")
         try:
-            print(f"🔧 DEBUG _crea_agent: Usando {len(self._tools) if self._tools else 0} tool(s) per {self._nome}")
             self._agent = create_agent(
                 model=self._client,
                 tools=self._tools,
