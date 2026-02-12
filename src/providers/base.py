@@ -13,8 +13,6 @@ from src.DBAgent import DBAgent
 import base64, validators
 
 class Provider(ABC):
-    # Attributo statico condiviso tra tutti i provider
-    _tools = []  # i tools per l'agent (condivisi tra tutti i provider)
       
     def __init__(self, nome, base_url, prefisso_token=""):
         self._nome=nome
@@ -26,6 +24,7 @@ class Provider(ABC):
         self._client=None
         self._modalita_agentica = False # indica se la modalità agentica è attivata o no
         self._agent = None   # l'agent
+        self._tools = []  # i tools per l'agent
         self._cronologia_messaggi = {} # dizionario che associa un modello alla sua cronologia dei messaggi
         self._modello_scelto = ""
         self._motore_di_embedding=None
@@ -124,61 +123,33 @@ class Provider(ABC):
         """Imposta la modalità agentica e crea/rimuove l'agent."""
         self._modalita_agentica = attiva
         if attiva and self._client is not None:
-            # Carica i tools dal DB se non sono già stati caricati
-            if not Provider._tools:
-                self._carica_tools_da_db()
+            # I tools sono già stati caricati da _carica_tools_nei_provider() in gui_utils.py
+            # Crea semplicemente l'agent con i tools già impostati in Provider._tools
             self._crea_agent()
         else:
             self._agent = None
     
-    def _carica_tools_da_db(self):
+    def set_tools(self, tools: list = []):
         """
-            Carica i tools configurati dal database e li imposta nel provider.
-            E' un fallback di sicurezza, questo codice viene già eseguito in
-            gui_utils.py nella funzione  "_inizializza_tools()"
-        """        
-
-        tools_config = DBAgent.carica_tools()
-        if not tools_config:
-            return
-        
-        all_tools_instances = st.session_state.get("tools_instances", {})
-        if not all_tools_instances:
-            return
-        
-        tools_to_use = []
-        for tool_dict in tools_config:
-            tool_name = tool_dict.get("nome_tool")
-            if tool_name in all_tools_instances:
-                tool_instance = all_tools_instances[tool_name]
-                tools = tool_instance.get_tool()
-                if isinstance(tools, list):
-                    tools_to_use.extend(tools)
-                else:
-                    tools_to_use.append(tools)
-        
-        if tools_to_use:
-            Provider.set_tools(tools_to_use)
-    
-    @classmethod
-    def set_tools(cls, tools: list = []):
-        """
-        Imposta i tools da utilizzare con l'agent (metodo di classe).
-        I tools sono condivisi tra tutti i provider.
+        Imposta i tools da utilizzare con l'agent (metodo di istanza).
         
         Args:
             tools: Lista di istanze di tools di LangChain.
         """
-        cls._tools = tools
+        print(f"🔧 DEBUG set_tools: Ricevuti {len(tools)} tool(s) per {self._nome}")
+        print(f"🔧 DEBUG set_tools: self._tools PRIMA: {len(self._tools) if self._tools else 0}")
+        self._tools = tools
+        print(f"🔧 DEBUG set_tools: self._tools DOPO: {len(self._tools) if self._tools else 0}")
     
     def _crea_agent(self):
         """Crea l'agent """
         if not self._client:
             raise Exception("Client LLM non inizializzato.")
         try:
+            print(f"🔧 DEBUG _crea_agent: Usando {len(self._tools) if self._tools else 0} tool(s) per {self._nome}")
             self._agent = create_agent(
                 model=self._client,
-                tools=Provider._tools,  # Usa l'attributo statico della classe
+                tools=self._tools,
                 # verbose=True,  # Imposta True per debug (stampa pensieri/azioni)
                 # max_iterations=5,  # Opzionale: limita loop ReAct
                 # system_prompt="You are a helpful assistant."
@@ -303,8 +274,8 @@ class Provider(ABC):
                 
                 if status_container:
                     # Mostra il numero di tools disponibili
-                    if Provider._tools:
-                        status_container.write(f"🔧 {len(Provider._tools)} tools disponibili")
+                    if self._tools:
+                        status_container.write(f"🔧 {len(self._tools)} tools disponibili")
                     else:
                         status_container.write("⚠️ Nessun tool configurato (modalità chatbot)")
                     

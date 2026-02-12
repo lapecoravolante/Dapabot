@@ -67,14 +67,16 @@ def _get_provider_defaults(provider: Provider, chiavi: dict) -> dict:
 
 def _inizializza_tools():
     """Inizializza e configura i tools disponibili.
-        I tools vengono caricati dinamicamente e 
-        popolati con le configurazioni prese dal DB
+        I tools vengono caricati dinamicamente e
+        popolati con le configurazioni prese dal DB.
+        Vengono configurati SOLO i tool attivi per evitare errori di validazione.
     """
     if "tools_instances" in st.session_state:
         return
         
     st.session_state.tools_instances = tools_loader.discover_tools()
-    tools_salvati = DBAgent.carica_tools()
+    # Carica solo i tool attivi per evitare errori di validazione su tool disattivati
+    tools_salvati = DBAgent.carica_tools_attivi()
     
     for tool_config in tools_salvati:
         nome_tool = tool_config["nome_tool"]
@@ -118,6 +120,10 @@ def inizializza():
     # Inizializza providers
     if "providers" not in st.session_state:
         st.session_state.providers = Loader.discover_providers()
+    
+    # Carica i tools attivi nei provider dopo l'inizializzazione
+    # Questo assicura che i tool siano disponibili quando viene attivata la modalità agentica
+    _carica_tools_nei_provider()
     
     # Inizializza tabbar
     if "tabbar_key" not in st.session_state:
@@ -207,7 +213,16 @@ def _on_close_tools_dialog():
         DBAgent.aggiorna_stati_tools(tools_selezionati)
         # Ricarica i tools solo nel provider corrente
         provider_corrente = st.session_state.get("provider_corrente_dialog")
-        _carica_tools_nei_provider(provider_name=provider_corrente)
+        risultato = _carica_tools_nei_provider(provider_name=provider_corrente)
+        
+        # Salva gli errori in session_state per mostrarli all'utente
+        if risultato['errors']:
+            st.session_state["tools_loading_errors"] = risultato['errors']
+        else:
+            # Rimuovi eventuali errori precedenti
+            if "tools_loading_errors" in st.session_state:
+                del st.session_state["tools_loading_errors"]
+        
         # Pulisci lo stato temporaneo
         del st.session_state["tools_selezionati_temp"]
         if "provider_corrente_dialog" in st.session_state:
@@ -576,6 +591,9 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
     
     # Ottieni solo i tools attivi dal database
     tools_config = DBAgent.carica_tools_attivi()
+    print(f"🔍 DEBUG: tools_config caricati dal DB: {len(tools_config)} tool attivi")
+    for tc in tools_config:
+        print(f"  - {tc.get('nome_tool')}")
     
     # Prepara la lista dei tools da passare ai provider
     tools_to_use = []
@@ -584,7 +602,9 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
     if tools_config:
         # Ottieni le istanze dei tools già caricate
         all_tools_instances = st.session_state.get("tools_instances", {})
+        print(f"🔍 DEBUG: tools_instances in session_state: {list(all_tools_instances.keys()) if all_tools_instances else 'NESSUNO'}")
         if not all_tools_instances:
+            print("⚠️ DEBUG: Nessuna istanza di tool trovata in session_state!")
             return risultato
         
         for tool_dict in tools_config:
@@ -592,19 +612,29 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
             
             if tool_name in all_tools_instances:
                 tool_instance = all_tools_instances[tool_name]
+                
+                # Riconfigura l'istanza del tool con i dati dal database
+                configurazione = tool_dict.get("configurazione", {})
+                for key, value in configurazione.items():
+                    if key == "_variabili_necessarie":
+                        tool_instance.set_variabili_necessarie(value)
+                    elif hasattr(tool_instance, key):
+                        setattr(tool_instance, key, value)
+                
                 # Ottieni i tools effettivi chiamando get_tool()
                 # Alcuni tools non richiedono configurazione, altri sì
                 # Se get_tool() fallisce, l'errore viene catturato e registrato
                 try:
-                    tools = tool_instance.get_tool()
-                    if isinstance(tools, list):
-                        tools_to_use.extend(tools)
-                    else:
-                        tools_to_use.append(tools)
+                    tools = tool_instance.get_tool() # torna una lista di tools
+                    print(f"✅ DEBUG: Tool {tool_name} caricato con successo: {len(tools)} tool(s)")
+                    tools_to_use.extend(tools)
                 except Exception as e:
                     # Tool richiede configurazione o ha altri problemi
                     # L'errore viene registrato ma non blocca il caricamento degli altri tools
+                    print(f"❌ DEBUG: Errore caricamento tool {tool_name}: {str(e)}")
                     risultato['errors'].append(f"{tool_name}: {str(e)}")
+   
+    print(f"🔍 DEBUG: Totale tools da passare ai provider: {len(tools_to_use)}")
     
     # Passa i tools ai provider specificati (anche se la lista è vuota)
     providers = st.session_state.get("providers", {})
@@ -620,18 +650,24 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
     
     for provider in providers_to_update.values():
         # Aggiorna sempre i tools, anche se la lista è vuota
+        print(f"🔧 DEBUG: Impostando {len(tools_to_use)} tool(s) nel provider {provider.nome()}")
         provider.set_tools(tools_to_use)
+        print(f"🔧 DEBUG: provider._tools dopo set_tools: {len(provider._tools) if provider._tools else 0} tool(s)")
         # Crea sempre l'agent, anche senza tools (funzionerà come un chatbot normale)
         try:
             provider._crea_agent()
+            print(f"✅ DEBUG: Agent creato con successo per {provider.nome()}")
             providers_aggiornati += 1
         except Exception as e:
+            print(f"❌ DEBUG: Errore creazione agent per {provider.nome()}: {str(e)}")
             risultato['errors'].append(f"{provider.nome()}: {str(e)}")
     
     # Prepara il risultato
     risultato['success'] = providers_aggiornati > 0
     risultato['tools_count'] = len(tools_to_use)
     risultato['providers_count'] = providers_aggiornati
+    
+    print(f"📊 DEBUG: Risultato finale - success: {risultato['success']}, tools: {risultato['tools_count']}, providers: {risultato['providers_count']}, errors: {len(risultato['errors'])}")
     
     return risultato
 
@@ -819,7 +855,15 @@ def crea_sidebar(providers: dict[str, Provider]):
                 # Sincronizza il valore del toggle
                 sincronizza_sessione(agentic_key)
                 # Ricarica i tools attivi solo nel provider corrente
-                _carica_tools_nei_provider(provider_name=provider_scelto)
+                risultato = _carica_tools_nei_provider(provider_name=provider_scelto)
+                
+                # Salva gli errori in session_state per mostrarli all'utente
+                if risultato['errors']:
+                    st.session_state["tools_loading_errors"] = risultato['errors']
+                else:
+                    # Rimuovi eventuali errori precedenti
+                    if "tools_loading_errors" in st.session_state:
+                        del st.session_state["tools_loading_errors"]
             
             # Toggle Modalità agentica
             modalita_agentica = st.toggle("Abilita Modalità Agentica", value=st.session_state[provider_scelto][agentic_key],
@@ -861,6 +905,12 @@ def crea_sidebar(providers: dict[str, Provider]):
                         st.write(f"• **{tool['nome_tool']}**")
             else:
                 st.info("ℹ️ Nessun tool attivo. Configura e attiva i tools dalla finestra di configurazione.")
+            
+            # Mostra eventuali errori di caricamento dei tools
+            if "tools_loading_errors" in st.session_state:
+                with st.expander("⚠️ Errori di caricamento tools", expanded=True):
+                    for error in st.session_state["tools_loading_errors"]:
+                        st.error(error, icon="❌")
             
         # Sezione RAG
         with st.expander("🔎 RAG", expanded=bool(st.session_state[provider_scelto][rag_enabled_key])):

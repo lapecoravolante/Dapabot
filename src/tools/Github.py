@@ -15,6 +15,7 @@ class Github(Tool):
             variabili_necessarie={
                 "LANGSMITH_API_KEY": "",
                 "LANGSMITH_TRACING":"",
+                "GITHUB_REPOSITORY":"",
                 "GITHUB_APP_ID":"",
                 "GITHUB_APP_PRIVATE_KEY":"",
                 "GITHUB_BRANCH":"",
