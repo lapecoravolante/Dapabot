@@ -6,10 +6,8 @@ from langchain.agents import create_agent
 from datetime import datetime
 from src.Messaggio import Messaggio
 from src.Allegato import Allegato
-from src.Configurazione import Configurazione
+from src.ConfigurazioneDB import ConfigurazioneDB
 from src.providers.rag import Rag
-from src.providers.StoricoChat import StoricoChat
-from src.DBAgent import DBAgent
 import base64, validators
 
 class Provider(ABC):
@@ -30,21 +28,23 @@ class Provider(ABC):
         self._motore_di_embedding=None
         self.set_disponibile(False) # mi dice se il provider è raggiungibile via rete o temporaneamente irragiungibile
         self._rag : Rag = Rag()
-        # carico l'eventuale configurazione da file su disco 
-        configurazione = Configurazione.carica().get(Configurazione.PROVIDERS_KEY, {})
-        for p in configurazione:
-            if p["nome"]== nome:
-                self.set_baseurl(p["base_url"])
-                self._api_key=p["api_key"]
-                self._modello_scelto=p["modello"]
-                if self._modello_scelto is not None: 
-                    # lista di tuple in cui il primo elemento è un messaggio in formato Langchain e il secondo è la corrispondente istanza di Messaggio
-                    self._cronologia_messaggi[self._modello_scelto]=None 
-                self.set_rag(attivo=p[Configurazione.RAG_KEY]["attivo"], 
-                             topk=p[Configurazione.RAG_KEY]["top_k"],
-                             modello=p[Configurazione.RAG_KEY]["modello"],
-                             upload_dir=p[Configurazione.RAG_KEY]["directory_allegati"],
-                             modalita_ricerca=p[Configurazione.RAG_KEY]["modalita_ricerca"])
+        # carico l'eventuale configurazione dal database unificato
+        config = ConfigurazioneDB.carica_provider(nome)
+        if config:
+            self.set_baseurl(config["base_url"])
+            self._api_key = config["api_key"]
+            self._modello_scelto = config["modello"]
+            if self._modello_scelto is not None:
+                # lista di tuple in cui il primo elemento è un messaggio in formato Langchain e il secondo è la corrispondente istanza di Messaggio
+                self._cronologia_messaggi[self._modello_scelto] = None
+            rag_config = config.get("rag", {})
+            self.set_rag(
+                attivo=rag_config.get("attivo", False),
+                topk=rag_config.get("top_k", 5),
+                modello=rag_config.get("modello"),
+                upload_dir=rag_config.get("directory_allegati", "uploads"),
+                modalita_ricerca=rag_config.get("modalita_ricerca", "similarity")
+            )
 
     """
         Ritorna una lista di tuple (m0, m1) in cui m0 è un messaggio in formato Langchain (quindi un'istanza 
@@ -52,8 +52,8 @@ class Provider(ABC):
         il contenuto sulla GUI e per i salvataggi sul DB
     """
     def _carica_cronologia_da_disco(self, modello) -> list[tuple]:
-        # ricostruisco la cronologia prendendo i messaggi dal disco e ricostruendo l'equivalente messaggio in formato Langchain
-        messaggi_su_disco=StoricoChat.carica_cronologia(self._nome, modello)
+        # ricostruisco la cronologia prendendo i messaggi dal database e ricostruendo l'equivalente messaggio in formato Langchain
+        messaggi_su_disco = ConfigurazioneDB.carica_cronologia(self._nome, modello)
         tuple_da_ritornare=[]
         for m in messaggi_su_disco:            
             match m.get_ruolo():
@@ -81,10 +81,10 @@ class Provider(ABC):
     def to_dict(self):
         return {
             "nome": self._nome,
-            "base_url": self._base_url,            
+            "base_url": self._base_url,
             "api_key": self._api_key,
             "modello": self._modello_scelto,
-            Configurazione.RAG_KEY:{
+            "rag": {
                 "attivo": self._rag.get_attivo(),
                 "modello": self._rag.get_modello(),
                 "top_k": self._rag.get_topk(),
@@ -354,6 +354,11 @@ class Provider(ABC):
     # questo metodo va sul DB, carica i messaggi salvati e li aggiunge alla cronologia attuale
     def carica_chat_da_db(self, modello=None):
         modello=modello or self._modello_scelto
+        
+        # Inizializza la cronologia per questo modello se non esiste
+        if modello not in self._cronologia_messaggi or self._cronologia_messaggi[modello] is None:
+            self._cronologia_messaggi[modello] = []
+        
         # recupera i messaggi dal DB
         messaggi_su_disco=self._carica_cronologia_da_disco(modello=modello)
         # fonde i messaggi provenienti dal db con quelli già presenti in memoria.

@@ -16,9 +16,11 @@ dependencies = [
     "langchain-docling>=2.0.0",
     "langchain-huggingface>=1.0.1",
     "langchain-openai>=1.0.3",
+    "peewee>=3.17.8",
     "rapidocr-onnxruntime>=1.4.4",
     "sentence-transformers>=5.1.2",
     "sqlite-web>=0.6.8",
     "streamlit>=1.51.0",
+    "uv>=0.10.2",
     "validators>=0.35.0",
 ]

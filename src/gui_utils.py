@@ -2,12 +2,10 @@ import streamlit as st
 import extra_streamlit_components as stx
 from datetime import datetime
 from src.Messaggio import Messaggio
-from src.Configurazione import Configurazione
+from src.ConfigurazioneDB import ConfigurazioneDB
 from src.providers.loader import Loader
 from src.providers.base import Provider
 from src.providers.rag import Rag
-from src.providers.StoricoChat import StoricoChat
-from src.DBAgent import DBAgent
 from src.tools.loader import Loader as tools_loader
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -51,7 +49,7 @@ def _get_provider_defaults(provider: Provider, chiavi: dict) -> dict:
         Dizionario con i valori di default
     """
     conf = provider.to_dict()
-    rag_conf = conf.get(Configurazione.RAG_KEY, {})
+    rag_conf = conf.get("rag", {})
     rag = provider.get_rag()
     
     return {
@@ -76,7 +74,7 @@ def _inizializza_tools():
         
     st.session_state.tools_instances = tools_loader.discover_tools()
     # Carica solo i tool attivi per evitare errori di validazione su tool disattivati
-    tools_salvati = DBAgent.carica_tools_attivi()
+    tools_salvati = ConfigurazioneDB.carica_tools_attivi()
     
     for tool_config in tools_salvati:
         nome_tool = tool_config["nome_tool"]
@@ -110,9 +108,8 @@ def _inizializza_provider(provider: Provider, modello_da_ripristinare: str = "")
 
 def inizializza():
     """Bootstrap iniziale dell'applicazione."""
-    # Avvia i server sqlite-web per i database
-    StoricoChat.start_sqlite_web_server()  # porta 8080 per storico_chat.db
-    DBAgent.start_sqlite_web_server()      # porta 8081 per agent.db
+    # Il server sqlite-web per config.db può essere avviato manualmente se necessario
+    # ConfigurazioneDB non ha metodi per sqlite-web integrati
     
     # Inizializza tools
     _inizializza_tools()
@@ -128,6 +125,14 @@ def inizializza():
     # Inizializza tabbar
     if "tabbar_key" not in st.session_state:
         st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"
+    
+    # Inizializza checkbox per visualizzazione chat dal DB
+    if "chat_db_key" not in st.session_state:
+        st.session_state["chat_db_key"] = False
+    
+    # Inizializza checkbox per autocaricamento chat dal DB
+    if "autoload_chat_db" not in st.session_state:
+        st.session_state["autoload_chat_db"] = False
     
     # Gestisce ripristino chat
     provider_da_ripristinare, modello_da_ripristinare = "", ""
@@ -158,24 +163,23 @@ def salva_configurazione(providers: dict[str, Provider]):
         
         # Recupera valori aggiuntivi non gestiti da _get_provider_defaults
         conf = provider.to_dict()
-        rag_conf = conf.get(Configurazione.RAG_KEY, {})
+        rag_conf = conf.get("rag", {})
         directory_allegati = provider.get_rag().get_upload_dir() or rag_conf.get("directory_allegati", Rag.DEFAULT_UPLOAD_DIR)
         
-        # Costruisce la configurazione da salvare
-        configurazioni.append({
-            "nome": nome,
-            "base_url": provider.get_baseurl(),
-            "api_key": defaults[chiavi['apikey']],
-            "modello": defaults[chiavi['modello']],
-            "modalita_agentica": defaults[chiavi['agentic']],
-            Configurazione.RAG_KEY: {
+        # Salva direttamente nel database unificato
+        ConfigurazioneDB.salva_provider(
+            nome=nome,
+            base_url=provider.get_baseurl(),
+            api_key=defaults[chiavi['apikey']],
+            modello=defaults[chiavi['modello']],
+            rag_config={
                 "attivo": defaults[chiavi['rag_enabled']],
                 "modello": defaults[chiavi['rag_model']],
                 "top_k": defaults[chiavi['rag_topk']],
                 "directory_allegati": directory_allegati,
                 "modalita_ricerca": defaults[chiavi['rag_modalita']]
             }
-        })
+        )
         
         # Riflette immediatamente la configurazione sul provider
         try:
@@ -190,9 +194,8 @@ def salva_configurazione(providers: dict[str, Provider]):
         except Exception:
             pass  # Non bloccare il salvataggio su errori runtime
     
-    # Salva su file
+    # Configurazione già salvata nel loop precedente
     try:
-        Configurazione.set(Configurazione.PROVIDERS_KEY, configurazioni)
         st.toast("Configurazione salvata ✅", icon="💾")
     except Exception as e:
         st.toast(f"Errore nel salvataggio: {e}", icon="💩")
@@ -210,7 +213,7 @@ def _on_close_tools_dialog():
     # Aggiorna il DB solo se ci sono modifiche
     if "tools_selezionati_temp" in st.session_state:
         tools_selezionati = st.session_state["tools_selezionati_temp"]
-        DBAgent.aggiorna_stati_tools(tools_selezionati)
+        ConfigurazioneDB.aggiorna_stati_tools(tools_selezionati)
         # Ricarica i tools solo nel provider corrente
         provider_corrente = st.session_state.get("provider_corrente_dialog")
         risultato = _carica_tools_nei_provider(provider_name=provider_corrente)
@@ -250,7 +253,7 @@ def mostra_dialog_tools_agent():
         return
     
     # Carica i tools già configurati dal DB
-    tools_salvati = DBAgent.carica_tools()
+    tools_salvati = ConfigurazioneDB.carica_tools()
     tools_salvati_dict = {t["nome_tool"]: t["configurazione"] for t in tools_salvati}
     
     # Inizializza lo stato della sessione per il tool selezionato
@@ -459,10 +462,10 @@ def mostra_dialog_tools_agent():
                                     setattr(tool_instance, key, value)
                             
                             # Salva nel database
-                            DBAgent.salva_tool({
-                                "nome_tool": selected_tool,
-                                "configurazione": st.session_state["tool_config_temp"]
-                            })
+                            ConfigurazioneDB.salva_tool(
+                                nome_tool=selected_tool,
+                                configurazione=st.session_state["tool_config_temp"]
+                            )
                             st.success(f"✅ Tool '{selected_tool}' salvato!")
                             st.session_state["selected_tool_for_config"] = None
                             st.session_state["tool_config_temp"] = {}
@@ -474,7 +477,7 @@ def mostra_dialog_tools_agent():
                     if selected_tool in tools_salvati_dict:
                         if st.button("❌ Rimuovi Tool", use_container_width=True):
                             try:
-                                DBAgent.cancella_tool({"nome_tool": selected_tool})
+                                ConfigurazioneDB.cancella_tool(selected_tool)
                                 st.success(f"🗑️ Tool '{selected_tool}' rimosso!")
                                 st.session_state["selected_tool_for_config"] = None
                                 st.session_state["tool_config_temp"] = {}
@@ -496,23 +499,36 @@ def mostra_dialog_tools_agent():
         col_import, col_export, col_delete = st.columns(3)
         
         with col_import:
-            st.markdown("### 📥 Importa")
+            st.markdown("### 📥 Importa Tools")
             uploaded_file = st.file_uploader("Seleziona file JSON", type=["json"], key="import_agent_db")
-            if uploaded_file and st.button("Importa configurazione", key="btn_import_agent_db", use_container_width=True):
+            if uploaded_file and st.button("Importa configurazione tools", key="btn_import_agent_db", use_container_width=True):
                 try:
+                    import json
                     json_data = uploaded_file.read().decode("utf-8")
-                    DBAgent.importa_db(json_data)
-                    st.success("✅ Configurazione importata!")
-                    st.rerun()
+                    data = json.loads(json_data)
+                    
+                    # Importa solo i tools dal JSON
+                    if "tools" in data:
+                        for tool_data in data["tools"]:
+                            ConfigurazioneDB.salva_tool(
+                                nome_tool=tool_data["nome_tool"],
+                                configurazione=tool_data["configurazione"],
+                                attivo=tool_data.get("attivo", True)
+                            )
+                        st.success(f"✅ Importati {len(data['tools'])} tools!")
+                        st.rerun()
+                    else:
+                        st.warning("Il file JSON non contiene dati sui tools")
                 except Exception as e:
                     st.error(f"Errore nell'importazione: {e}")
+            st.caption("ℹ️ Importa solo la configurazione dei tools")
         
         with col_export:
-            st.markdown("### 📤 Esporta")
-            if st.button("Esporta configurazione", key="btn_export_agent_db", use_container_width=True):
+            st.markdown("### 📤 Esporta Tools")
+            if st.button("Esporta configurazione tools", key="btn_export_agent_db", use_container_width=True):
                 try:
-                    json_data = DBAgent.esporta_db()
-                    filename = f"agentdb-{datetime.now().strftime('%Y%m%d')}.json"
+                    json_data = ConfigurazioneDB.esporta_json()
+                    filename = f"tools-config-{datetime.now().strftime('%Y%m%d')}.json"
                     st.download_button(
                         label="⬇️ Scarica file",
                         data=json_data,
@@ -521,15 +537,16 @@ def mostra_dialog_tools_agent():
                         key="download_agent_db",
                         use_container_width=True
                     )
+                    st.caption("ℹ️ Esporta solo la configurazione dei tools")
                 except Exception as e:
                     st.error(f"Errore nell'esportazione: {e}")
         
         with col_delete:
-            st.markdown("### 🗑️ Elimina")
-            if st.button("Elimina database", key="btn_delete_agent_db", use_container_width=True, type="secondary"):
+            st.markdown("### 🗑️ Elimina Tools")
+            if st.button("Elimina tutti i tools", key="btn_delete_agent_db", use_container_width=True, type="secondary"):
                 if st.session_state.get("confirm_delete_agent_db", False):
                     try:
-                        DBAgent.elimina_db()
+                        ConfigurazioneDB.elimina_tutti_tools()
                         # Svuota i tools da tutti i provider
                         providers = st.session_state.get("providers", {})
                         for provider in providers.values():
@@ -538,25 +555,26 @@ def mostra_dialog_tools_agent():
                                 provider._crea_agent()
                             except:
                                 pass  # Ignora errori durante la ricreazione dell'agent
-                        st.success("✅ Database eliminato e tools rimossi dai provider!")
+                        st.success("✅ Tutti i tools eliminati e rimossi dai provider!")
                         st.session_state["confirm_delete_agent_db"] = False
                         st.rerun()
                     except Exception as e:
                         st.error(f"Errore nell'eliminazione: {e}")
                 else:
                     st.session_state["confirm_delete_agent_db"] = True
-                    st.warning("⚠️ Clicca di nuovo per confermare l'eliminazione")
+                    st.warning("⚠️ Clicca di nuovo per confermare l'eliminazione di tutti i tools")
+            st.caption("ℹ️ Elimina solo i tools dalla tabella tool")
         
         st.divider()
         
         # Informazioni sul database
         st.markdown("### ℹ️ Informazioni")
-        tools_salvati_count = len(DBAgent.carica_tools())
+        tools_salvati_count = len(ConfigurazioneDB.carica_tools())
         st.info(f"**Tools configurati nel database:** {tools_salvati_count}")
         
         if tools_salvati_count > 0:
             with st.expander("📋 Dettagli tools salvati"):
-                for tool in DBAgent.carica_tools():
+                for tool in ConfigurazioneDB.carica_tools():
                     st.write(f"• **{tool['nome_tool']}**")
                     config = tool['configurazione']
                     if config:
@@ -589,7 +607,7 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
     }
     
     # Ottieni solo i tools attivi dal database
-    tools_config = DBAgent.carica_tools_attivi()
+    tools_config = ConfigurazioneDB.carica_tools_attivi()
     
     # Prepara la lista dei tools da passare ai provider
     tools_to_use = []
@@ -811,17 +829,20 @@ def crea_sidebar(providers: dict[str, Provider]):
                     prov, mod = val.split(" | ")
                     # Aggiorna la chiave per la TabBar, forzando la ricreazione del widget e l'aggiornamento del provider corretto
                     if st.session_state.get(f"{st.session_state['tabbar_key']}"):
-                        del st.session_state[f"{st.session_state['tabbar_key']}"]                    
-                    st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"            
-                    # Aggiorna la selezione del modello per quel provider                    "
+                        del st.session_state[f"{st.session_state['tabbar_key']}"]
+                    st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"
+                    # Aggiorna la selezione del modello per quel provider
                     st.session_state[f"modello_{prov}"] = mod
+                    # Carica i messaggi dal database SOLO se "Autocaricamento dal DB" è abilitato
+                    if prov in providers and st.session_state.get("autoload_chat_db", False):
+                        providers[prov].carica_chat_da_db(modello=mod)
             
             chat_recenti = ["",]
             for nome_prov, prov in providers.items():
                 modelli = prov.get_lista_modelli_con_chat()
                 chat_recenti.extend([f"{nome_prov} | {modello}" for modello in modelli])
             if "chat_db_key" in st.session_state and st.session_state["chat_db_key"]:
-                chat_su_disco=set([f"{prov} | {mod}" for prov, mod in StoricoChat.ritorna_chat_recenti()])
+                chat_su_disco=set([f"{prov} | {mod}" for prov, mod in ConfigurazioneDB.ritorna_chat_recenti()])
                 chat_recenti=sorted(list(chat_su_disco.union(set(chat_recenti))))
             if len(chat_recenti)>1:
                 st.selectbox("📂 Riapri chat recente:", options=chat_recenti, key="ripristina_chat", on_change=on_ripristina_chat)
@@ -855,36 +876,13 @@ def crea_sidebar(providers: dict[str, Provider]):
             modalita_agentica = st.toggle("Abilita Modalità Agentica", value=st.session_state[provider_scelto][agentic_key],
                        key=agentic_key, on_change=on_toggle_agentic)
             
-            # Widgets sempre visibili (non più condizionati da modalita_agentica)
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Pulsante per configurare i tools
-                if st.button("⚙️ Configura Tools", key="btn_config_tools", use_container_width=True):
-                    st.session_state["tools_dialog_open"] = True
-                    st.session_state["provider_corrente_dialog"] = provider_scelto
-            
-            with col2:
-                # Link per gestione avanzata DB agent.db (server avviato automaticamente all'inizializzazione)
-                if DBAgent.is_sqlite_web_active():
-                    url = DBAgent.get_sqlite_web_url()
-                    st.markdown(
-                        f'<a href="{url}" target="_blank">'
-                        '<button style="width:100%; padding:8px; font-size:1rem;">'
-                        '🔍 Gestione avanzata DB'
-                        '</button></a>',
-                        unsafe_allow_html=True
-                    )
-                else:
-                    st.markdown(
-                        '<button style="width:100%; padding:8px; font-size:1rem; opacity:0.5;" disabled>'
-                        '🔍 Server DB non disponibile'
-                        '</button>',
-                        unsafe_allow_html=True
-                    )
+            # Pulsante per configurare i tools
+            if st.button("⚙️ Configura Tools", key="btn_config_tools", use_container_width=True):
+                st.session_state["tools_dialog_open"] = True
+                st.session_state["provider_corrente_dialog"] = provider_scelto
             
             # Mostra info sui tools attivi
-            tools_attivi = DBAgent.carica_tools_attivi()
+            tools_attivi = ConfigurazioneDB.carica_tools_attivi()
             if tools_attivi:
                 with st.expander("📋 Dettagli tools attivi", expanded=False):
                     for tool in tools_attivi:
@@ -948,7 +946,7 @@ def crea_sidebar(providers: dict[str, Provider]):
                             st.caption("ℹ️ Salva su disco il contenuto della chat attualmente visualizzata")
                             if salva:
                                 cronologia = provider.get_cronologia_messaggi(modello=modello_scelto)
-                                StoricoChat.salva_chat(provider_scelto, modello_scelto, cronologia)
+                                ConfigurazioneDB.salva_chat(provider_scelto, modello_scelto, cronologia)
                                 st.success("Chat salvata nel DB", icon="✅")
                         except Exception as e:
                             st.exception(e)
@@ -965,7 +963,7 @@ def crea_sidebar(providers: dict[str, Provider]):
                                             modelli = prov.get_lista_modelli_con_chat()
                                             for modello in modelli:
                                                 st.write(f"Provider: {nome_p}, modello: {modello}...")
-                                                StoricoChat.salva_chat(nome_p, modello, prov.get_cronologia_messaggi(modello=modello))
+                                                ConfigurazioneDB.salva_chat(nome_p, modello, prov.get_cronologia_messaggi(modello=modello))
                                     st.success("Tutte le chat salvate", icon="✅")
                             except Exception as e:
                                 st.exception(e)
@@ -977,14 +975,14 @@ def crea_sidebar(providers: dict[str, Provider]):
                         ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") # genera la stringa di data/ora
                         filename = f"storico_{ts}.json"
                         try:
-                            json_data = StoricoChat.esporta_json()
+                            json_data = ConfigurazioneDB.esporta_chat_json()
                             st.download_button(
                                 label="⬇️ Esporta tutte le chat",
                                 data=json_data,
                                 file_name=filename,
                                 mime="application/json"
                             )
-                            st.caption("ℹ️ Scarica il contenuto del DB delle chat in formato JSON")
+                            st.caption("ℹ️ Scarica solo le chat in formato JSON")
                         except Exception as e:
                             st.exception(e)
                     with col2:
@@ -994,8 +992,9 @@ def crea_sidebar(providers: dict[str, Provider]):
                             json_file = st.file_uploader("📥 Seleziona JSON da importare", type=["json"])
                             if json_file and st.button("📥 Importa chat"):
                                 text = json_file.read().decode("utf-8")
-                                StoricoChat.importa_json(text)
+                                ConfigurazioneDB.importa_chat_json(text)
                                 st.success("Chat importate", icon="✅")
+                                st.rerun()
                         except Exception as e:
                             st.exception(e)
             with colonna3:# PULSANTI DI ELIMINAZIONE CHAT
@@ -1033,40 +1032,35 @@ def crea_sidebar(providers: dict[str, Provider]):
                         st.caption("ℹ️ La chat visualizzata viene cancellata dal disco. È possibile continuare a lavorare con quella visualizzata.")
                         if cancella:
                             try:
-                                StoricoChat.cancella_chat(provider_scelto, modello_scelto)
+                                ConfigurazioneDB.cancella_chat(provider_scelto, modello_scelto)
                                 st.success("Chat cancellata dal disco", icon="✅")
                             except Exception as e:
                                 st.exception(e)
                     with col4: # Cancella tutto il DB
                         st.subheader("Elimina tutto il DB")
-                        elimina=st.button("💥 Elimina tutto il DB")
-                        st.caption("ℹ️ Il database con tutte le chat salvate viene eliminato definitivamente dal disco. Tutti i dati non esportati andranno persi.")
+                        elimina=st.button("💥 Elimina tutte le chat")
+                        st.caption("ℹ️ Tutte le chat salvate vengono eliminate definitivamente. I dati non esportati andranno persi. La configurazione dei provider e dei tools viene preservata.")
                         if elimina:
                             try:
-                                StoricoChat.cancella_tutto()
-                                st.success("DB eliminato", icon="✅")
+                                ConfigurazioneDB.elimina_tutte_chat()
+                                st.success("Tutte le chat eliminate", icon="✅")
                             except Exception as e:
-                                st.exception
-            # Gestisci cronologie (placeholder)
-            if StoricoChat.is_sqlite_web_active():
-                url = StoricoChat.get_sqlite_web_url()
-                st.markdown(
-                    f'<a href="{url}" target="_blank">'
-                    '<button style="width:100%; padding:8px; font-size:1rem;">'
-                    '🔍 Gestione avanzata DB'
-                    '</button></a>',
-                    unsafe_allow_html=True
-                )
-            else:
-                if st.button("🔍 Avvia e apri la gestione avanzata del DB"):
-                    started = StoricoChat.start_sqlite_web_server()
-                    if started:
-                        st.toast("Server DB avviato", icon="🌐")
-                    else:
-                        st.error("Avvio sqlite‑web fallito")
-
-        # Salva configurazione (tutti i provider)
-        st.button("Salva configurazione", key="salva", on_click=salva_configurazione, args=[providers])
+                                st.error(f"Errore durante l'eliminazione delle chat: {e}")
+        # Salva configurazione e gestione DB (in fondo alla sidebar)
+        col_salva, col_db = st.columns(2)
+        with col_salva:
+            st.button("Salva configurazione", key="salva", on_click=salva_configurazione, args=[providers], use_container_width=True)
+        with col_db:
+            # Link per gestione avanzata DB config.db
+            # sqlite-web viene avviato automaticamente all'avvio dell'applicazione
+            url = "http://127.0.0.1:8080"
+            st.markdown(
+                f'<a href="{url}" target="_blank">'
+                '<button style="width:100%; padding:8px; font-size:1rem; border:1px solid #ccc; border-radius:4px; cursor:pointer; background-color:white;">'
+                '🔍 Gestione avanzata DB'
+                '</button></a>',
+                unsafe_allow_html=True
+            )
         # Aggiorna provider runtime (usa i valori restituiti dai widget)
         try:
             provider.set_client(modello_scelto, api_key)
