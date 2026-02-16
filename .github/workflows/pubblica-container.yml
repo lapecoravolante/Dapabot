@@ -36,25 +36,39 @@ jobs:
         tags: |
           ghcr.io/${{ github.repository_owner }}/dapabot:latest
     
-    - name: Elimina le vecchia immagini senza tag
+    - name: Elimina le vecchie immagini
       run: |
-        # Ottieni l'elenco delle versioni del package
         PACKAGE_NAME="dapabot"
-        VERSIONS=$(gh api \
+        
+        # Ottieni tutte le versioni ordinate per data di creazione
+        echo "Recupero tutte le versioni del package..."
+        ALL_VERSIONS=$(gh api \
           -H "Accept: application/vnd.github+json" \
           -H "X-GitHub-Api-Version: 2022-11-28" \
           "/users/${{ github.repository_owner }}/packages/container/${PACKAGE_NAME}/versions" \
-          --jq '.[] | select(.metadata.container.tags | length == 0) | .id')
+          --jq 'sort_by(.created_at) | reverse')
         
-        # Elimina le versioni senza tag (untagged)
-        for VERSION_ID in $VERSIONS; do
-          echo "Eliminazione versione ID: $VERSION_ID"
-          gh api \
-            --method DELETE \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "/users/${{ github.repository_owner }}/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}" || true
-        done
+        # Ottieni l'ID della versione più recente (da mantenere)
+        LATEST_VERSION_ID=$(echo "$ALL_VERSIONS" | jq -r '.[0].id')
+        echo "Versione più recente da mantenere: $LATEST_VERSION_ID"
+        
+        # Ottieni gli ID di tutte le altre versioni (da eliminare)
+        VERSIONS_TO_DELETE=$(echo "$ALL_VERSIONS" | jq -r '.[1:] | .[].id')
+        
+        # Elimina tutte le versioni tranne la più recente
+        if [ -n "$VERSIONS_TO_DELETE" ]; then
+          for VERSION_ID in $VERSIONS_TO_DELETE; do
+            echo "Eliminazione versione ID: $VERSION_ID"
+            gh api \
+              --method DELETE \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/users/${{ github.repository_owner }}/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}" || true
+          done
+          echo "Pulizia completata!"
+        else
+          echo "Nessuna versione vecchia da eliminare."
+        fi
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
