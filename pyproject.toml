@@ -17,6 +17,7 @@ dependencies = [
     "langchain-huggingface>=1.0.1",
     "langchain-openai>=1.0.3",
     "peewee>=3.17.8",
+    "python-magic>=0.4.27",
     "rapidocr-onnxruntime>=1.4.4",
     "replicate>=1.0.7",
     "sentence-transformers>=5.1.2",

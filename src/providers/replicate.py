@@ -1,11 +1,310 @@
 from src.providers.base import Provider
 from langchain_openai import OpenAIEmbeddings
-from langchain.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage, ToolMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.callbacks import CallbackManagerForLLMRun
 from src.Messaggio import Messaggio
 from src.Allegato import Allegato
 from replicate.client import Client
 from replicate.exceptions import ModelError, ReplicateError
 import replicate, requests, urllib
+from typing import Any, Optional
+import base64
+import magic
+
+
+class ReplicateChatModel(BaseChatModel):
+    """
+    Implementazione di BaseChatModel per Replicate.
+    Supporta messaggi multimodali, tools e integrazione nativa con LangChain.
+    """
+    
+    client: Any = None
+    model_id: str = ""
+    model_id_map: dict[str, str] = {}
+    
+    class Config:
+        arbitrary_types_allowed = True
+    
+    @property
+    def _llm_type(self) -> str:
+        """Ritorna il tipo di LLM."""
+        return "replicate"
+    
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: Optional[list[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        """
+        Genera una risposta dai messaggi usando l'API Replicate.
+        
+        Args:
+            messages: Lista di messaggi in formato LangChain
+            stop: Sequenze di stop opzionali
+            run_manager: Manager per callbacks
+            **kwargs: Parametri aggiuntivi
+            
+        Returns:
+            ChatResult con la risposta generata
+        """
+        if not self.client:
+            raise ValueError("Client Replicate non inizializzato")
+        
+        if not self.model_id:
+            raise ValueError("Model ID non specificato")
+        
+        # Converti i messaggi in prompt per Replicate
+        prompt = self._convert_messages_to_prompt(messages)
+        
+        # Prepara input multimodale se presente
+        multimodal_input = self._prepare_multimodal_input(messages)
+        
+        # Prepara l'input completo per il modello
+        model_input = {
+            "prompt": prompt,
+            **multimodal_input
+        }
+        
+        # Aggiungi parametri di stop se presenti
+        if stop:
+            model_input["stop_sequences"] = stop
+        
+        # Aggiungi eventuali parametri extra
+        model_input.update(kwargs)
+        
+        try:
+            # Chiama l'API Replicate
+            output = self.client.run(self.model_id, input=model_input)
+            
+            # Converti l'output in AIMessage
+            ai_message = self._convert_output(output)
+            
+            # Crea il risultato
+            generation = ChatGeneration(message=ai_message)
+            return ChatResult(generations=[generation])
+            
+        except ModelError as e:
+            raise ValueError(f"Errore del modello Replicate: {e}")
+        except ReplicateError as e:
+            raise ValueError(f"Errore API Replicate: {e}")
+        except Exception as e:
+            raise ValueError(f"Errore durante la generazione: {e}")
+    
+    def _convert_messages_to_prompt(self, messages: list[BaseMessage]) -> str:
+        """
+        Converte una lista di messaggi LangChain in un prompt testuale per Replicate.
+        
+        Args:
+            messages: Lista di messaggi LangChain
+            
+        Returns:
+            Prompt formattato come stringa
+        """
+        prompt_parts = []
+        
+        for msg in messages:
+            role = msg.type
+            content = getattr(msg, "content", "")
+            
+            # Gestisci diversi tipi di messaggi
+            if role == "system":
+                prompt_parts.append(f"System: {content}")
+            elif role == "human":
+                prompt_parts.append(f"User: {content}")
+            elif role in ("ai", "assistant"):
+                prompt_parts.append(f"Assistant: {content}")
+            elif role == "tool":
+                # Per i messaggi tool, includi il risultato
+                tool_name = getattr(msg, "name", "tool")
+                prompt_parts.append(f"Tool ({tool_name}): {content}")
+            else:
+                # Fallback per altri tipi
+                prompt_parts.append(f"{role.capitalize()}: {content}")
+        
+        # Aggiungi il prompt per la risposta dell'assistente
+        prompt_complete = "\n\n".join(prompt_parts) + "\n\nAssistant:"
+        return prompt_complete
+    
+    def _prepare_multimodal_input(self, messages: list[BaseMessage]) -> dict[str, Any]:
+        """
+        Prepara input multimodale dai messaggi per Replicate.
+        Estrae immagini, audio, video dai content_blocks dei messaggi.
+        
+        Args:
+            messages: Lista di messaggi LangChain
+            
+        Returns:
+            Dizionario con input multimodali
+        """
+        multimodal_input = {}
+        
+        for msg in messages:
+            # Controlla se il messaggio ha content_blocks (formato multimodale)
+            if hasattr(msg, "content_blocks") and msg.content_blocks:
+                for block in msg.content_blocks:
+                    if not isinstance(block, dict):
+                        continue
+                    
+                    block_type: Literal['text-plain', 'audio', 'file', 'image', 'video', 'invalid_tool_call', 'server_tool_result', 'server_tool_call', 'server_tool_call_chunk', 'text', 'tool_call', 'tool_call_chunk', 'reasoning', 'non_standard'] = block.get("type", "")
+                    
+                    # Gestisci diversi tipi di contenuto multimodale
+                    if block_type == "image":
+                        # Decodifica base64 se presente
+                        if "base64" in block:
+                            image_data = base64.b64decode(block["base64"])
+                            multimodal_input["image"] = image_data
+                        elif "url" in block:
+                            multimodal_input["image"] = block["url"]
+                    
+                    elif block_type == "audio":
+                        if "base64" in block:
+                            audio_data = base64.b64decode(block["base64"])
+                            multimodal_input["audio"] = audio_data
+                        elif "url" in block:
+                            multimodal_input["audio"] = block["url"]
+                    
+                    elif block_type == "video":
+                        if "base64" in block:
+                            video_data = base64.b64decode(block["base64"])
+                            multimodal_input["video"] = video_data
+                        elif "url" in block:
+                            multimodal_input["video"] = block["url"]
+                    
+                    elif block_type == "file":
+                        if "base64" in block:
+                            file_data = base64.b64decode(block["base64"])
+                            multimodal_input["file"] = file_data
+        
+        return multimodal_input
+    
+    def _convert_output(self, output: Any) -> AIMessage:
+        """
+        Converte l'output di Replicate in un AIMessage di LangChain.
+        
+        Args:
+            output: Output dall'API Replicate
+            
+        Returns:
+            AIMessage con il contenuto della risposta
+        """
+        text_content = ""
+        content_blocks = []
+        
+        if output is None:
+            return AIMessage(content="")
+        
+        # Output può essere: stringa, lista, FileOutput, o URL
+        if isinstance(output, str):
+            # Potrebbe essere testo o URL
+            if output.startswith(("http://", "https://")):
+                # È un URL a un file - aggiungi come blocco
+                content_blocks.append({
+                    "type": "url",
+                    "url": output
+                })
+            else:
+                text_content = output
+        
+        elif isinstance(output, list):
+            # Lista di elementi (stringhe, URL, FileOutput)
+            for item in output:
+                if isinstance(item, str):
+                    if item.startswith(("http://", "https://")):
+                        content_blocks.append({
+                            "type": "url",
+                            "url": item
+                        })
+                    else:
+                        text_content += item
+                elif hasattr(item, 'read'):
+                    # FileOutput o file-like object
+                    try:
+                        file_content = item.read()
+                        mime_type = self._detect_mime_type(file_content)
+                        
+                        content_blocks.append({
+                            "type": mime_type.split('/')[0] if mime_type else "file",
+                            "mime_type": mime_type,
+                            "base64": base64.b64encode(file_content).decode('utf-8')
+                        })
+                    except Exception as e:
+                        print(f"Errore nella lettura FileOutput: {e}")
+                else:
+                    text_content += str(item)
+        
+        elif hasattr(output, 'read'):
+            # FileOutput singolo
+            try:
+                file_content = output.read()
+                mime_type = self._detect_mime_type(file_content)
+                
+                content_blocks.append({
+                    "type": mime_type.split('/')[0] if mime_type else "file",
+                    "mime_type": mime_type,
+                    "base64": base64.b64encode(file_content).decode('utf-8')
+                })
+            except Exception as e:
+                print(f"Errore nella lettura FileOutput: {e}")
+        
+        else:
+            # Altro tipo, converti in stringa
+            text_content = str(output)
+        
+        # Crea AIMessage con contenuto e blocchi
+        if content_blocks:
+            # Aggiungi il testo come primo blocco se presente
+            if text_content:
+                content_blocks.insert(0, {"type": "text", "text": text_content})
+            return AIMessage(content=text_content, content_blocks=content_blocks)
+        else:
+            return AIMessage(content=text_content)
+    
+    def _detect_mime_type(self, file_content: bytes) -> str:
+        """
+        Rileva il tipo MIME dal contenuto del file usando python-magic.
+        
+        Args:
+            file_content: Contenuto del file in bytes
+            
+        Returns:
+            Tipo MIME rilevato
+        """
+        if not file_content:
+            return "application/octet-stream"
+        
+        try:
+            # Usa i primi 2048 byte per il rilevamento (come raccomandato dalla documentazione)
+            buffer = file_content[:2048] if len(file_content) > 2048 else file_content
+            mime_type = magic.from_buffer(buffer, mime=True)
+            return mime_type
+        except Exception as e:
+            print(f"Errore nel rilevamento MIME type: {e}")
+            return "application/octet-stream"
+    
+    def bind_tools(
+        self,
+        tools: list[Any],
+        **kwargs: Any,
+    ) -> "ReplicateChatModel":
+        """
+        Associa tools al modello per l'uso con agents.
+        
+        Args:
+            tools: Lista di tools LangChain
+            **kwargs: Parametri aggiuntivi
+            
+        Returns:
+            Nuova istanza del modello con tools associati
+        """
+        # Per ora, Replicate non supporta nativamente function calling
+        # Ritorniamo una copia del modello che può essere usata con agents
+        # Gli agents di LangChain gestiranno i tools tramite ReAct prompting
+        return self.model_copy(update={"tools": tools, **kwargs})
+
 
 class ReplicateProvider(Provider):
     
@@ -16,13 +315,10 @@ class ReplicateProvider(Provider):
 
     def _query(self, url):
         """
-        Usa requests per ottenere la lista dei modelli
-        Replicate identifica i modelli con un ID poco user friendly ma fornisce anche la stringa
-        "owner/nome:versione" alternativa per selezionare il modello. Non tutti i modelli però hanno 
-        la versione pubblicamente visibile, quindi per tagliare la testa al toro viene costruita
-        una mappa che associa ad ogni id di modello la stringa 'owner/nome:versione' da ritornare 
-        per avere qualcosa di più descrittivo sulla GUI.
-        Il codice usa l'id per lavorare mentre l'utente sulla gui vede 'owner/nome:versione'.
+            Replicate identifica i modelli con un ID poco user friendly ma fornisce anche la stringa
+            "owner/nome:versione" alternativa per selezionare il modello. Non tutti i modelli però hanno 
+            la versione pubblicamente visibile, quindi per tagliare la testa al toro viene costruita
+            una mappa che associa ad ogni nome user-friendly di modello il relativo nome da usare nel codice.
         """
         # Popola il dizionario _model_id_map con la mappatura nome → ID versione.        
         try:
@@ -91,246 +387,20 @@ class ReplicateProvider(Provider):
     
     def _crea_client(self, base_url, modello, api_key):
         """
-        Crea un client Replicate nativo. Gli passo il proxy nel caso servisse
+        Crea un'istanza di ReplicateChatModel che implementa l'interfaccia LangChain.
         """
-        return Client(api_token=api_key, proxy=urllib.request.getproxies()["https"])
-    
-    def invia_messaggi(self, messaggi: list[Messaggio], status_container=None):
-        """
-        Invia messaggi usando il client Replicate nativo.
-        Supporta multimodalità e RAG.
-        """
-        if not self._modello_scelto:
-            raise Exception("Client non inizializzato. Inserisci un'API KEY valida e scegli un modello.")
+        # Crea il client Replicate nativo
+        replicate_client = Client(api_token=api_key, proxy=urllib.request.getproxies().get("https"))
         
-        if not self._client:
-            raise Exception("Client Replicate non inizializzato.")
+        # Ottieni l'ID del modello dalla mappa
+        model_id = self._model_id_map.get(modello, modello)
         
-        cronologia_modello = self._cronologia_messaggi[self._modello_scelto]
-        preambolo_rag = "\nRispondi dando priorità al contesto fornito di seguito:\n"
-        
-        try:
-            # 1. Costruisce il prompt a partire dalla cronologia esistente
-            prompt_parts = []
-            
-            # Cronologia precedente
-            for msg_langchain, _ in cronologia_modello:
-                ruolo = msg_langchain.type
-                contenuto = getattr(msg_langchain, "content", "")
-                if ruolo == "system":
-                    prompt_parts.append(f"System: {contenuto}")
-                elif ruolo == "user":
-                    prompt_parts.append(f"User: {contenuto}")
-                elif ruolo in ("ai", "assistant"):
-                    prompt_parts.append(f"Assistant: {contenuto}")
-            
-            # 2. Appende al prompt i nuovi messaggi
-            messaggi_da_salvare = []
-            input_multimodale = {}
-            
-            for m in messaggi:
-                if m.get_ruolo() == "system":
-                    prompt_parts.append(f"System: {m.get_testo()}")
-                    # Crea messaggio con ID per il salvataggio
-                    msg_system = Messaggio(
-                        ruolo="system",
-                        testo=m.get_testo(),
-                        allegati=[],
-                        timestamp="",
-                        id=f"{self._nome}-{self._modello_scelto}"
-                    )
-                    messaggi_da_salvare.append((SystemMessage(content=m.get_testo()), msg_system))
-                
-                elif m.get_ruolo() == "user":
-                    contenuto_testo = m.get_testo()
-                    allegati_utente = m.get_allegati()
-                    
-                    # 3. Gestisce il RAG
-                    if self._rag.get_attivo():
-                        self._rag.set_prompt(m)
-                        allegati_rag: list[Allegato] = self.rag()
-                        contenuti_rag = "\n---\n".join(allegato.contenuto for allegato in allegati_rag)
-                        contenuto_testo += preambolo_rag + contenuti_rag
-                    
-                    # 4. Se non bisgona fare RAG, allora gli allegati si possono aggiungere come sono
-                    elif allegati_utente:
-                        input_multimodale = self._prepara_input_multimodale(m)
-                    
-                    prompt_parts.append(f"User: {contenuto_testo}")
-                    # Crea messaggio con ID per il salvataggio
-                    msg_user = Messaggio(
-                        ruolo="user",
-                        testo=contenuto_testo,
-                        allegati=allegati_utente,
-                        timestamp="",
-                        id=f"{self._nome}-{self._modello_scelto}"
-                    )
-                    messaggi_da_salvare.append((HumanMessage(content=contenuto_testo), msg_user))
-            
-            # 5. Costruisce il prompt completo aggiungendo i nuovi messaggi a quelli della cronologia
-            prompt_completo = "\n\n".join(prompt_parts) + "\n\nAssistant:"
-            
-            # 6. Ottiene l'ID del modello della mappa
-            model_id = self._model_id_map.get(self._modello_scelto)
-            if not model_id:
-                raise Exception(f"Modello non trovato nella mappa: {self._modello_scelto}")
-            
-            # 7. Prepara l'input per il modello
-            model_input = {
-                "prompt": prompt_completo,
-                **input_multimodale  # Aggiungi eventuali input multimodali
-            }
-
-            # 8. Manda il prompt al modello e recupera la risposta 
-            try:
-                risposta = self._client.run(model_id, input=model_input)
-            except ModelError as e:
-                raise Exception(f"Errore del modello: {e}")
-            except ReplicateError as e:
-                raise Exception(f"Errore API Replicate: {e}")
-            
-            # 9. Separa il testo e gli allegati della risposta
-            testo_risposta, allegati_risposta = self._converti_output(risposta)
-            
-            # 10. Creare messaggio risposta
-            m = AIMessage(content=testo_risposta)
-            
-            # 11. Aggiorna la cronologia con i messaggi che hanno già l'ID
-            cronologia_modello.extend(messaggi_da_salvare)
-            
-            # Crea il messaggio finale (con eventuali allegati) da salvare in cronologia
-            messaggio_risposta = Messaggio(
-                ruolo="assistant",
-                testo=testo_risposta,
-                allegati=allegati_risposta,
-                timestamp="",
-                id=f"{self._nome}-{self._modello_scelto}"
-            )
-            cronologia_modello.append((m, messaggio_risposta))
-            
-        except Exception as errore:
-            raise Exception(f"Errore nell'invio del messaggio: {errore}")
-    
-    def _prepara_input_multimodale(self, messaggio: Messaggio) -> dict:
-        """
-        Prepara input multimodale per Replicate.
-        Converte allegati in formato accettato dall'API.
-        """
-        input_extra = {}
-        
-        for allegato in messaggio.get_allegati():
-            # Ottieni il tipo MIME
-            mime_type = getattr(allegato, 'type', 'application/octet-stream')
-            tipo_principale = mime_type.split('/')[0]
-            
-            # Replicate accetta file handle o URL
-            if tipo_principale == "image":
-                input_extra["image"] = allegato
-            elif tipo_principale == "audio":
-                input_extra["audio"] = allegato
-            elif tipo_principale == "video":
-                input_extra["video"] = allegato
-            else:
-                # Per altri tipi, prova a passare come file generico
-                input_extra["file"] = allegato
-        
-        return input_extra
-    
-    def _converti_output(self, output) -> tuple[str, list]:
-        """
-        Converte l'output di Replicate in testo e allegati.
-        
-        Returns:
-            tuple: (testo, lista_allegati)
-        """
-        testo = ""
-        allegati = []
-        
-        if output is None:
-            return "", []
-        
-        # Output può essere: stringa, lista, FileOutput, o URL
-        if isinstance(output, str):
-            # Potrebbe essere testo o URL
-            if output.startswith(("http://", "https://")):
-                # È un URL a un file
-                allegati.append(self._crea_allegato_da_url(output))
-            else:
-                testo = output
-        
-        elif isinstance(output, list):
-            # Lista di elementi (stringhe, URL, FileOutput)
-            for item in output:
-                if isinstance(item, str):
-                    if item.startswith(("http://", "https://")):
-                        allegati.append(self._crea_allegato_da_url(item))
-                    else:
-                        testo += item
-                elif hasattr(item, 'read'):
-                    # FileOutput o file-like object
-                    allegati.append(self._crea_allegato_da_file_output(item))
-                else:
-                    testo += str(item)
-        
-        elif hasattr(output, 'read'):
-            # FileOutput singolo
-            allegati.append(self._crea_allegato_da_file_output(output))
-        
-        else:
-            # Altro tipo, converti in stringa
-            testo = str(output)
-        
-        return testo, allegati
-    
-    def _crea_allegato_da_url(self, url: str):
-        """
-        Crea un oggetto Allegato da un URL.
-        """
-        # Per ora, salva solo l'URL come riferimento
-        # In futuro si potrebbe scaricare il file
-        return Allegato(
-            contenuto=url,
-            tipo="url",
-            mime_type="text/uri-list",
-            filename=url.split('/')[-1]
+        # Crea e ritorna il ReplicateChatModel
+        return ReplicateChatModel(
+            client=replicate_client,
+            model_id=model_id,
+            model_id_map=self._model_id_map
         )
-    
-    def _crea_allegato_da_file_output(self, file_output):
-        """
-        Crea un oggetto Allegato da un FileOutput di Replicate.
-        """
-        try:
-            # Leggi il contenuto del file
-            contenuto = file_output.read()
-            
-            # Determina il tipo MIME dall'URL se disponibile
-            url = getattr(file_output, 'url', '')
-            mime_type = "application/octet-stream"
-            
-            if '.png' in url or '.jpg' in url or '.jpeg' in url:
-                mime_type = f"image/{url.split('.')[-1]}"
-            elif '.mp4' in url or '.webm' in url:
-                mime_type = f"video/{url.split('.')[-1]}"
-            elif '.mp3' in url or '.wav' in url:
-                mime_type = f"audio/{url.split('.')[-1]}"
-            
-            return Allegato(
-                contenuto=contenuto,
-                tipo=mime_type.split('/')[0],
-                mime_type=mime_type,
-                filename=url.split('/')[-1] if url else "output"
-            )
-        except Exception as e:
-            print(f"Errore nella conversione FileOutput: {e}")
-            return None
-    
-    def _converti_messaggio(self, m):
-        """Converte un messaggio LangChain in un oggetto Messaggio."""
-        ruolo = m.type
-        testo = getattr(m, "content", "")
-        allegati = []
-        
-        return Messaggio(ruolo=ruolo, testo=testo, allegati=allegati, timestamp="")
 
     def rag(self):
         if self._rag.get_modello():
