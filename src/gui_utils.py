@@ -1141,6 +1141,11 @@ def mostra_cronologia_chat(cronologia: list[Messaggio]):
                     render = render_map.get(allegato.tipo)
                     if render:
                         render(allegato.contenuto)
+                    elif allegato.tipo == "url":
+                        # Gestisci URL: mostra link cliccabile
+                        url = allegato.contenuto
+                        filename = allegato.filename if hasattr(allegato, 'filename') else url.split('/')[-1]
+                        st.markdown(f"🔗 [Scarica: {filename}]({url})")
                     elif allegato.tipo == "file":
                         st.write(f"📄 File ricevuto dal modello: {allegato.mime_type}")
                     else:
