@@ -390,7 +390,7 @@ class ReplicateProvider(Provider):
         Crea un'istanza di ReplicateChatModel che implementa l'interfaccia LangChain.
         """
         # Crea il client Replicate nativo
-        replicate_client = Client(api_token=api_key, proxy=urllib.request.getproxies().get("https"))
+        replicate_client = Client(api_token=api_key, proxy=urllib.request.getproxies().get("https", None))
         
         # Ottieni l'ID del modello dalla mappa
         model_id = self._model_id_map.get(modello, modello)
