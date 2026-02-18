@@ -308,7 +308,8 @@ def mostra_dialog_tools_agent():
         # Inizializza lo stato se non esiste
         if "tools_selezionati_temp" not in st.session_state:
             st.session_state["tools_selezionati_temp"] = tools_attivi_db
-        
+        st.caption("ℹ️ I tools rimossi dal DB saranno usati senza configurazione")
+
         tools_selezionati = st.multiselect(
             "Seleziona quali tools vuoi rendere attivi",
             options=sorted(tutti_tools_disponibili),
@@ -452,7 +453,7 @@ def mostra_dialog_tools_agent():
                 col_save, col_remove, col_cancel = st.columns(3)
                 
                 with col_save:
-                    if st.button("💾 Salva Tool", type="primary", use_container_width=True):
+                    if st.button("💾 Salva Tool", type="primary", use_container_width=True, help="Salva la configurazione del tool nel DB"):
                         try:
                             # Aggiorna l'istanza del tool con i nuovi valori
                             for key, value in st.session_state["tool_config_temp"].items():
@@ -476,7 +477,7 @@ def mostra_dialog_tools_agent():
                 
                 with col_remove:
                     if selected_tool in tools_salvati_dict:
-                        if st.button("❌ Rimuovi Tool", use_container_width=True):
+                        if st.button("❌ Rimuovi Tool", use_container_width=True, help="Rimuove la configurazione del tool dal DB. Se si attiva il tool, verrà usato senza configurazione"):
                             try:
                                 ConfigurazioneDB.cancella_tool(selected_tool)
                                 st.success(f"🗑️ Tool '{selected_tool}' rimosso!")
