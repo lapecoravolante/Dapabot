@@ -329,13 +329,15 @@ class Provider(ABC):
         for blocco in m.content_blocks:
             tipo = blocco["type"]
             # aggiunge i blocchi di tipo testo al testo principale del messaggio
-            if tipo == "text": 
+            if tipo == "text":
                 testo += blocco["text"] + "\n"
             # Tutti gli altri tipi diventano Allegato
-            else: 
-                contenuto = base64.b64decode(blocco["base64"]) if "base64" in blocco else blocco.get("text", "")
+            else:
+                # Mantieni il contenuto nel formato originale (base64 string o text)
+                # NON decodificare per evitare problemi di serializzazione JSON
+                contenuto = blocco.get("base64", blocco.get("text", ""))
                 mime_type = blocco.get("mime_type", tipo)
-                allegati.append(Allegato(tipo=tipo, contenuto=contenuto, mime_type=mime_type))    
+                allegati.append(Allegato(tipo=tipo, contenuto=contenuto, mime_type=mime_type))
         return Messaggio(testo=testo, ruolo=ruolo, allegati=allegati, timestamp=timestamp, id=f"{self._nome}-{self._modello_scelto}")
         
     """ 

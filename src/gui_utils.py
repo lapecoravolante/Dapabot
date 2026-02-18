@@ -1,5 +1,6 @@
 import streamlit as st
 import extra_streamlit_components as stx
+import base64
 from datetime import datetime
 from src.Messaggio import Messaggio
 from src.ConfigurazioneDB import ConfigurazioneDB
@@ -1117,14 +1118,7 @@ def generate_response(prompt_utente, messaggio_di_sistema, provider_scelto: Prov
         # Modalità normale senza feedback visivo
         provider_scelto.invia_messaggi(messaggi_da_inviare)
     
-def mostra_cronologia_chat(cronologia: list[Messaggio]):
-    render_map = {
-        "text": st.write,
-        "text-plain": st.text,
-        "image": st.image,
-        "audio": st.audio,
-        "video": st.video,
-    }
+def mostra_cronologia_chat(cronologia: list[Messaggio]):    
     for msg in cronologia:
         ruolo = msg.get_ruolo()
         testo = msg.get_testo()
@@ -1138,15 +1132,31 @@ def mostra_cronologia_chat(cronologia: list[Messaggio]):
                     st.markdown(testo)
                 # Poi gli allegati
                 for allegato in allegati:
-                    render = render_map.get(allegato.tipo)
-                    if render:
-                        render(allegato.contenuto)
-                    elif allegato.tipo == "url":
+                    tipo = allegato.tipo
+                    contenuto = allegato.contenuto
+                    
+                    # Per contenuti multimediali, decodifica base64 in bytes per Streamlit
+                    if tipo in ("image", "audio", "video"):
+                        try:
+                            # Il contenuto è una stringa base64, decodificala
+                            contenuto_bytes = base64.b64decode(contenuto)
+                            if tipo == "image":
+                                st.image(contenuto_bytes)
+                            elif tipo == "audio":
+                                st.audio(contenuto_bytes)
+                            elif tipo == "video":
+                                st.video(contenuto_bytes)
+                        except Exception as e:
+                            st.error(f"Errore nella visualizzazione di {tipo}: {e}")
+                    elif tipo == "text":
+                        st.write(contenuto)
+                    elif tipo == "text-plain":
+                        st.text(contenuto)
+                    elif tipo == "url":
                         # Gestisci URL: mostra link cliccabile
-                        url = allegato.contenuto
-                        filename = allegato.filename if hasattr(allegato, 'filename') else url.split('/')[-1]
-                        st.markdown(f"🔗 [Scarica: {filename}]({url})")
-                    elif allegato.tipo == "file":
+                        filename = allegato.filename if hasattr(allegato, 'filename') else contenuto.split('/')[-1]
+                        st.markdown(f"🔗 [Scarica: {filename}]({contenuto})")
+                    elif tipo == "file":
                         st.write(f"📄 File ricevuto dal modello: {allegato.mime_type}")
                     else:
                         st.write("⚠️ Ricevuto un allegato sconosciuto ⚠️")

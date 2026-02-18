@@ -153,31 +153,35 @@ class ReplicateChatModel(BaseChatModel):
                     
                     # Gestisci diversi tipi di contenuto multimodale
                     if block_type == "image":
-                        # Decodifica base64 se presente
+                        # Usa data URI per base64 (JSON serializable)
                         if "base64" in block:
-                            image_data = base64.b64decode(block["base64"])
-                            multimodal_input["image"] = image_data
+                            mime_type = block.get("mime_type", "image/png")
+                            data_uri = f"data:{mime_type};base64,{block['base64']}"
+                            multimodal_input["image"] = data_uri
                         elif "url" in block:
                             multimodal_input["image"] = block["url"]
                     
                     elif block_type == "audio":
                         if "base64" in block:
-                            audio_data = base64.b64decode(block["base64"])
-                            multimodal_input["audio"] = audio_data
+                            mime_type = block.get("mime_type", "audio/mpeg")
+                            data_uri = f"data:{mime_type};base64,{block['base64']}"
+                            multimodal_input["audio"] = data_uri
                         elif "url" in block:
                             multimodal_input["audio"] = block["url"]
                     
                     elif block_type == "video":
                         if "base64" in block:
-                            video_data = base64.b64decode(block["base64"])
-                            multimodal_input["video"] = video_data
+                            mime_type = block.get("mime_type", "video/mp4")
+                            data_uri = f"data:{mime_type};base64,{block['base64']}"
+                            multimodal_input["video"] = data_uri
                         elif "url" in block:
                             multimodal_input["video"] = block["url"]
                     
                     elif block_type == "file":
                         if "base64" in block:
-                            file_data = base64.b64decode(block["base64"])
-                            multimodal_input["file"] = file_data
+                            mime_type = block.get("mime_type", "application/octet-stream")
+                            data_uri = f"data:{mime_type};base64,{block['base64']}"
+                            multimodal_input["file"] = data_uri
         
         return multimodal_input
     

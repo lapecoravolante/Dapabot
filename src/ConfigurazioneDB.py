@@ -275,9 +275,10 @@ class ConfigurazioneDB:
                 contenuto = allegato.contenuto
                 tipo = allegato.tipo
                 
-                # Codifica in Base64 se binario
-                if not tipo.startswith("text"):
-                    contenuto = base64.b64encode(contenuto).decode("utf-8")
+                # Il contenuto è già nel formato corretto:
+                # - base64 string per file binari (image, video, audio, file)
+                # - testo plain per file di testo
+                # Non serve ricodificare
                 
                 AllegatoModel.create(
                     id=f"{msg_id}-{idx}",  # Usa indice invece di timestamp
@@ -332,9 +333,10 @@ class ConfigurazioneDB:
                 contenuto = a.contenuto
                 tipo = a.tipo
                 
-                # Decodifica da Base64 se binario
-                if not tipo.startswith("text"):
-                    contenuto = base64.b64decode(contenuto)
+                # Il contenuto è già in formato corretto dal DB:
+                # - base64 string per file binari (image, video, audio, file)
+                # - testo plain per file di testo
+                # Non decodificare, mantieni il formato originale
                 
                 allegati.append(Allegato(
                     tipo=tipo,
@@ -347,7 +349,7 @@ class ConfigurazioneDB:
                 testo=msg.contenuto,
                 ruolo=msg.ruolo,
                 allegati=allegati,
-                timestamp=msg.timestamp.isoformat(),
+                timestamp=msg.timestamp,  # Passa datetime direttamente, non la stringa ISO
                 id=msg.id
             ))
         
@@ -565,9 +567,10 @@ class ConfigurazioneDB:
                     contenuto = all_data['contenuto']
                     tipo = all_data['tipo']
                     
-                    # Decodifica da Base64 se non è testo
-                    if not tipo.startswith("text") and isinstance(contenuto, str):
-                        contenuto = base64.b64decode(contenuto)
+                    # Il contenuto è già nel formato corretto dal JSON:
+                    # - base64 string per file binari
+                    # - testo plain per file di testo
+                    # Non decodificare, mantieni il formato originale
                     
                     allegati.append(Allegato(
                         tipo=tipo,
