@@ -11,6 +11,7 @@ from .messaggio import MessaggioModel
 from .allegato import AllegatoModel
 from .messaggio_in_chat import MessaggioInChatModel
 from .tool import ToolModel
+from .mcp_server import MCPServerModel
 
 __all__ = [
     'db',
@@ -23,6 +24,7 @@ __all__ = [
     'AllegatoModel',
     'MessaggioInChatModel',
     'ToolModel',
+    'MCPServerModel',
 ]
 
 # Made with Bob

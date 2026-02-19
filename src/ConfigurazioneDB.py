@@ -16,7 +16,7 @@ from src.Allegato import Allegato
 from src.models import (
     db, BaseModel, ProviderModel, ConfigurazioneRagModel,
     ModelloModel, ChatModel, MessaggioModel, AllegatoModel,
-    MessaggioInChatModel, ToolModel
+    MessaggioInChatModel, ToolModel, MCPServerModel
 )
 
 
@@ -478,6 +478,121 @@ class ConfigurazioneDB:
         """Elimina tutti i tools dalla tabella tool"""
         cls.inizializza_db()
         ToolModel.delete().execute()
+    
+    # ==================== GESTIONE SERVER MCP ====================
+    
+    @classmethod
+    def salva_mcp_server(cls, nome: str, tipo: str, descrizione: str = "",
+                         configurazione: dict = None, attivo: bool = True):
+        """
+        Salva o aggiorna la configurazione di un server MCP.
+        
+        Args:
+            nome: Nome identificativo del server
+            tipo: Tipo di server ('local' o 'remote')
+            descrizione: Descrizione del server
+            configurazione: Dizionario con la configurazione specifica
+            attivo: Se il server è attivo o meno
+        """
+        cls.inizializza_db()
+        
+        server, created = MCPServerModel.get_or_create(
+            nome=nome,
+            defaults={
+                'tipo': tipo,
+                'descrizione': descrizione,
+                'configurazione': json.dumps(configurazione or {}, ensure_ascii=False),
+                'attivo': attivo
+            }
+        )
+        
+        if not created:
+            server.tipo = tipo
+            server.descrizione = descrizione
+            server.set_configurazione(configurazione or {})
+            server.attivo = attivo
+            server.save()
+    
+    @classmethod
+    def carica_mcp_servers(cls) -> list[dict]:
+        """Carica tutti i server MCP configurati"""
+        cls.inizializza_db()
+        
+        return [server.to_dict() for server in MCPServerModel.select()]
+    
+    @classmethod
+    def carica_mcp_servers_attivi(cls) -> list[dict]:
+        """Carica solo i server MCP attivi"""
+        cls.inizializza_db()
+        
+        servers = MCPServerModel.select().where(MCPServerModel.attivo == True)
+        return [server.to_dict() for server in servers]
+    
+    @classmethod
+    def carica_mcp_server(cls, nome: str) -> dict | None:
+        """
+        Carica la configurazione di un server MCP specifico.
+        
+        Returns:
+            Dizionario con la configurazione o None se non esiste
+        """
+        cls.inizializza_db()
+        
+        try:
+            server = MCPServerModel.get(MCPServerModel.nome == nome)
+            return server.to_dict()
+        except MCPServerModel.DoesNotExist:
+            return None
+    
+    @classmethod
+    def aggiorna_stato_mcp_server(cls, nome: str, attivo: bool):
+        """Aggiorna lo stato attivo/inattivo di un server MCP"""
+        cls.inizializza_db()
+        
+        try:
+            server = MCPServerModel.get(MCPServerModel.nome == nome)
+            server.attivo = attivo
+            server.save()
+        except MCPServerModel.DoesNotExist:
+            pass
+    
+    @classmethod
+    def cancella_mcp_server(cls, nome: str):
+        """Cancella un server MCP"""
+        cls.inizializza_db()
+        
+        try:
+            server = MCPServerModel.get(MCPServerModel.nome == nome)
+            server.delete_instance()
+        except MCPServerModel.DoesNotExist:
+            pass
+    
+    @classmethod
+    def aggiorna_stati_mcp_servers(cls, servers_attivi: list[str]):
+        """
+        Aggiorna lo stato di tutti i server MCP.
+        I server nella lista vengono attivati, gli altri disattivati.
+        """
+        cls.inizializza_db()
+        
+        # Disattiva tutti
+        MCPServerModel.update(attivo=False).execute()
+        
+        # Attiva quelli nella lista
+        if servers_attivi:
+            for server_name in servers_attivi:
+                try:
+                    server = MCPServerModel.get(MCPServerModel.nome == server_name)
+                    server.attivo = True
+                    server.save()
+                except MCPServerModel.DoesNotExist:
+                    pass
+    
+    @classmethod
+    def elimina_tutti_mcp_servers(cls):
+        """Elimina tutti i server MCP dalla tabella"""
+        cls.inizializza_db()
+        MCPServerModel.delete().execute()
     
     @classmethod
     def elimina_tutte_chat(cls):

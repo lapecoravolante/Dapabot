@@ -29,12 +29,12 @@ class BaseModel(Model):
             from . import (
                 ProviderModel, ConfigurazioneRagModel, ModelloModel,
                 ChatModel, MessaggioModel, AllegatoModel,
-                MessaggioInChatModel, ToolModel
+                MessaggioInChatModel, ToolModel, MCPServerModel
             )
             models = [
                 ProviderModel, ConfigurazioneRagModel, ModelloModel,
                 ChatModel, MessaggioModel, AllegatoModel,
-                MessaggioInChatModel, ToolModel
+                MessaggioInChatModel, ToolModel, MCPServerModel
             ]
         
         db.create_tables(models, safe=True)
@@ -46,10 +46,10 @@ class BaseModel(Model):
             from . import (
                 ProviderModel, ConfigurazioneRagModel, ModelloModel,
                 ChatModel, MessaggioModel, AllegatoModel,
-                MessaggioInChatModel, ToolModel
+                MessaggioInChatModel, ToolModel, MCPServerModel
             )
             models = [
-                ToolModel, MessaggioInChatModel, AllegatoModel,
+                MCPServerModel, ToolModel, MessaggioInChatModel, AllegatoModel,
                 MessaggioModel, ChatModel, ModelloModel,
                 ConfigurazioneRagModel, ProviderModel
             ]
