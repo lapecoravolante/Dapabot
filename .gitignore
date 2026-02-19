@@ -13,3 +13,4 @@ config.db
 # Virtual environments
 .venv
 .vscode/
+test_mcp_server.py
