@@ -1,14 +1,21 @@
 """
-Client MCP semplificato usando langchain-mcp-adapters
+Client MCP semplificato usando langchain-mcp-adapters per i tools
+e SDK nativo MCP per discovery di risorse e prompt
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import asyncio
 import threading
 from functools import wraps
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_core.tools import BaseTool, StructuredTool
 from src.ConfigurazioneDB import ConfigurazioneDB
+
+# Import SDK nativo MCP per discovery
+from mcp import ClientSession
+from mcp.client.stdio import stdio_client, StdioServerParameters
+from mcp.client.sse import sse_client
+import httpx
 
 
 def async_to_sync_tool(async_tool: BaseTool) -> BaseTool:
@@ -50,6 +57,10 @@ class MCPClientManager:
         # Stato del riavvio in background
         self._restart_in_progress: bool = False
         self._restart_thread: Optional[threading.Thread] = None
+        # Cache per discovery di risorse e prompt (SDK nativo)
+        self._resources_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._prompts_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._discovery_cache_hash: Optional[str] = None
     
     def carica_configurazioni_da_db(self) -> None:
         """
@@ -104,6 +115,8 @@ class MCPClientManager:
             self._client = None
             self._tools_cache = []
             self._config_hash = None
+            # Invalida anche la cache di discovery
+            self.invalidate_discovery_cache()
     
     def get_client(self) -> MultiServerMCPClient:
         """
@@ -197,6 +210,8 @@ class MCPClientManager:
             self._client = None
             self._tools_cache = []
             self._config_hash = None
+            # Invalida anche la cache di discovery
+            self.invalidate_discovery_cache()
         finally:
             # Marca il riavvio come completato
             self._restart_in_progress = False
@@ -285,6 +300,186 @@ class MCPClientManager:
         
         # Forza il ricaricamento delle configurazioni
         self.carica_configurazioni_da_db()
+    
+    async def _create_native_session(self, server_name: str) -> Optional[Tuple[ClientSession, Any]]:
+        """
+        Crea una sessione nativa MCP per un server specifico.
+        Supporta sia server locali (stdio) che remoti (HTTP).
+        
+        Args:
+            server_name: Nome del server MCP
+            
+        Returns:
+            Tupla (ClientSession, context_manager) o None se il server non esiste
+        """
+        if server_name not in self._server_configs:
+            return None
+        
+        config = self._server_configs[server_name]
+        transport = config.get('transport', 'stdio')
+        
+        if transport == 'stdio':
+            # Server locale con stdio
+            server_params = StdioServerParameters(
+                command=config.get('command', ''),
+                args=config.get('args', []),
+                env=config.get('env', {})
+            )
+            
+            context = stdio_client(server_params)
+            read, write = await context.__aenter__()
+            session = ClientSession(read, write)
+            await session.__aenter__()
+            await session.initialize()
+            
+            return session, context
+            
+        elif transport == 'http':
+            # Server remoto con SSE
+            url = config.get('url', '')
+            headers = config.get('headers', {})
+            
+            # Crea client HTTP con headers personalizzati
+            http_client = httpx.AsyncClient(headers=headers)
+            
+            context = sse_client(url, http_client=http_client)
+            read, write = await context.__aenter__()
+            session = ClientSession(read, write)
+            await session.__aenter__()
+            await session.initialize()
+            
+            return session, context
+        
+        return None
+    
+    async def list_available_resources(self, server_name: str, use_cache: bool = True) -> List[Dict[str, Any]]:
+        """
+        Elenca tutte le risorse disponibili da un server MCP usando l'SDK nativo.
+        
+        Args:
+            server_name: Nome del server MCP
+            use_cache: Se True, usa la cache se disponibile
+            
+        Returns:
+            Lista di dizionari con informazioni sulle risorse:
+            [{'uri': str, 'name': str, 'description': str, 'mimeType': str}, ...]
+        """
+        # Calcola hash della configurazione per invalidare cache
+        import hashlib
+        import json
+        config_str = json.dumps(self._server_configs, sort_keys=True)
+        current_hash = hashlib.md5(config_str.encode()).hexdigest()
+        
+        # Usa cache se disponibile e richiesta
+        if use_cache and self._discovery_cache_hash == current_hash:
+            if server_name in self._resources_cache:
+                return self._resources_cache[server_name]
+        
+        # Altrimenti interroga il server
+        session_tuple = await self._create_native_session(server_name)
+        if not session_tuple:
+            return []
+        
+        session, context = session_tuple
+        
+        try:
+            # Lista le risorse disponibili
+            result = await session.list_resources()
+            
+            # Converti in formato semplice
+            resources = []
+            for resource in result.resources:
+                resources.append({
+                    'uri': str(resource.uri),
+                    'name': resource.name,
+                    'description': resource.description or '',
+                    'mimeType': resource.mimeType or ''
+                })
+            
+            # Aggiorna cache
+            self._resources_cache[server_name] = resources
+            self._discovery_cache_hash = current_hash
+            
+            return resources
+            
+        finally:
+            # Chiudi la sessione
+            await session.__aexit__(None, None, None)
+            await context.__aexit__(None, None, None)
+    
+    async def list_available_prompts(self, server_name: str, use_cache: bool = True) -> List[Dict[str, Any]]:
+        """
+        Elenca tutti i prompt disponibili da un server MCP usando l'SDK nativo.
+        
+        Args:
+            server_name: Nome del server MCP
+            use_cache: Se True, usa la cache se disponibile
+            
+        Returns:
+            Lista di dizionari con informazioni sui prompt:
+            [{'name': str, 'description': str, 'arguments': [...]}, ...]
+        """
+        # Calcola hash della configurazione per invalidare cache
+        import hashlib
+        import json
+        config_str = json.dumps(self._server_configs, sort_keys=True)
+        current_hash = hashlib.md5(config_str.encode()).hexdigest()
+        
+        # Usa cache se disponibile e richiesta
+        if use_cache and self._discovery_cache_hash == current_hash:
+            if server_name in self._prompts_cache:
+                return self._prompts_cache[server_name]
+        
+        # Altrimenti interroga il server
+        session_tuple = await self._create_native_session(server_name)
+        if not session_tuple:
+            return []
+        
+        session, context = session_tuple
+        
+        try:
+            # Lista i prompt disponibili
+            result = await session.list_prompts()
+            
+            # Converti in formato semplice
+            prompts = []
+            for prompt in result.prompts:
+                prompt_info = {
+                    'name': prompt.name,
+                    'description': prompt.description or '',
+                    'arguments': []
+                }
+                
+                # Aggiungi informazioni sugli argomenti se presenti
+                if prompt.arguments:
+                    for arg in prompt.arguments:
+                        prompt_info['arguments'].append({
+                            'name': arg.name,
+                            'description': arg.description or '',
+                            'required': arg.required
+                        })
+                
+                prompts.append(prompt_info)
+            
+            # Aggiorna cache
+            self._prompts_cache[server_name] = prompts
+            self._discovery_cache_hash = current_hash
+            
+            return prompts
+            
+        finally:
+            # Chiudi la sessione
+            await session.__aexit__(None, None, None)
+            await context.__aexit__(None, None, None)
+    
+    def invalidate_discovery_cache(self) -> None:
+        """
+        Invalida la cache di discovery (risorse e prompt).
+        Utile quando si sa che le configurazioni sono cambiate.
+        """
+        self._resources_cache = {}
+        self._prompts_cache = {}
+        self._discovery_cache_hash = None
 
 
 # Istanza singleton globale
