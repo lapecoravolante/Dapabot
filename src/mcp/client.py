@@ -55,10 +55,12 @@ class MCPClientManager:
         """
         Carica le configurazioni dei server MCP attivi dal database
         e le prepara per MultiServerMCPClient.
+        NON resetta il client se le configurazioni non sono cambiate.
         """
         servers_attivi = ConfigurazioneDB.carica_mcp_servers_attivi()
         
-        self._server_configs = {}
+        # Costruisci le nuove configurazioni
+        new_server_configs = {}
         
         for server in servers_attivi:
             nome = server['nome']
@@ -67,7 +69,7 @@ class MCPClientManager:
             
             if tipo == 'local':
                 # Configurazione per server locale (stdio)
-                self._server_configs[nome] = {
+                new_server_configs[nome] = {
                     'transport': 'stdio',
                     'command': config.get('comando', ''),
                     'args': config.get('args', []),
@@ -88,7 +90,20 @@ class MCPClientManager:
                 if headers:
                     server_config['headers'] = headers
                 
-                self._server_configs[nome] = server_config
+                new_server_configs[nome] = server_config
+        
+        # Confronta con le configurazioni esistenti
+        import json
+        old_config_json = json.dumps(self._server_configs, sort_keys=True)
+        new_config_json = json.dumps(new_server_configs, sort_keys=True)
+        
+        # Aggiorna solo se le configurazioni sono cambiate
+        if old_config_json != new_config_json:
+            self._server_configs = new_server_configs
+            # Resetta il client per forzare la riconnessione con le nuove configurazioni
+            self._client = None
+            self._tools_cache = []
+            self._config_hash = None
     
     def get_client(self) -> MultiServerMCPClient:
         """
@@ -231,6 +246,45 @@ class MCPClientManager:
         if not self._server_configs:
             self.carica_configurazioni_da_db()
         return list(self._server_configs.keys())
+    
+    def salva_mcp_server(self, nome: str, tipo: str, descrizione: str = "",
+                         configurazione: Optional[dict] = None, attivo: bool = True) -> None:
+        """
+        Salva o aggiorna la configurazione di un server MCP nel database.
+        Se la configurazione cambia, forza il ricaricamento del client.
+        
+        Args:
+            nome: Nome identificativo del server
+            tipo: Tipo di server ('local' o 'remote')
+            descrizione: Descrizione del server
+            configurazione: Dizionario con la configurazione specifica
+            attivo: Se il server è attivo o meno
+        """
+        # Salva nel database
+        config_changed = ConfigurazioneDB.salva_mcp_server(
+            nome=nome,
+            tipo=tipo,
+            descrizione=descrizione,
+            configurazione=configurazione or {},
+            attivo=attivo
+        )
+        
+        # Se la configurazione è cambiata, forza il ricaricamento
+        if config_changed:
+            self.carica_configurazioni_da_db()
+    
+    def cancella_mcp_server(self, nome: str) -> None:
+        """
+        Cancella un server MCP dal database e forza il ricaricamento del client.
+        
+        Args:
+            nome: Nome del server da cancellare
+        """
+        # Cancella dal database
+        ConfigurazioneDB.cancella_mcp_server(nome)
+        
+        # Forza il ricaricamento delle configurazioni
+        self.carica_configurazioni_da_db()
 
 
 # Istanza singleton globale

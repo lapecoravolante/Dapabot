@@ -12,21 +12,51 @@ def _on_close_mcp_dialog():
     """
     Callback chiamato quando la dialog MCP viene chiusa.
     Aggiorna il DB con le selezioni fatte nel multiselect.
-    Riavvia per fermare i server disattivati e avviare quelli attivati.
+    Gestisce individualmente TUTTI i server che cambiano stato (locali e remoti).
     """
     st.session_state["mcp_dialog_open"] = False
     
     # Aggiorna il DB solo se ci sono modifiche
     if "mcp_servers_selezionati_temp" in st.session_state:
         servers_selezionati = st.session_state["mcp_servers_selezionati_temp"]
-        ConfigurazioneDB.aggiorna_stati_mcp_servers(servers_selezionati)
         
-        # Riavvia per applicare i cambi di stato:
-        # - Ferma i server disattivati
-        # - Avvia i server attivati
-        # - Mantiene attivi i server già attivi
+        # Ottieni lo stato precedente dal database
+        servers_db = ConfigurazioneDB.carica_mcp_servers()
+        servers_attivi_prima = {s['nome']: s for s in servers_db if s.get('attivo', False)}
+        servers_selezionati_set = set(servers_selezionati)
+        
+        # Gestisci individualmente TUTTI i server che cambiano stato
         manager = get_mcp_client_manager()
-        manager.reset()
+        
+        # Server da attivare (locali E remoti)
+        for nome_server in servers_selezionati_set:
+            if nome_server not in servers_attivi_prima:
+                # Server che passa da inattivo ad attivo
+                server_info = next((s for s in servers_db if s['nome'] == nome_server), None)
+                if server_info:
+                    # Gestisci sia locali che remoti
+                    manager.salva_mcp_server(
+                        nome=nome_server,
+                        tipo=server_info['tipo'],
+                        descrizione=server_info.get('descrizione', ''),
+                        configurazione=server_info.get('configurazione', {}),
+                        attivo=True
+                    )
+        
+        # Server da disattivare (locali E remoti)
+        for nome_server, server_info in servers_attivi_prima.items():
+            if nome_server not in servers_selezionati_set:
+                # Server che passa da attivo a inattivo
+                manager.salva_mcp_server(
+                    nome=nome_server,
+                    tipo=server_info['tipo'],
+                    descrizione=server_info.get('descrizione', ''),
+                    configurazione=server_info.get('configurazione', {}),
+                    attivo=False
+                )
+        
+        # NON chiamare più aggiorna_stati_mcp_servers() perché abbiamo già
+        # aggiornato individualmente tutti i server che hanno cambiato stato
         
         # Pulisci lo stato temporaneo
         del st.session_state["mcp_servers_selezionati_temp"]
@@ -248,16 +278,15 @@ def mostra_dialog_mcp():
                 counter += 1
             
             # Crea un nuovo server con configurazione di default (inattivo)
-            # salva_mcp_server restituisce False perché il server è inattivo
-            ConfigurazioneDB.salva_mcp_server(
+            # Usa il nuovo metodo del manager che gestisce anche il PID
+            manager = get_mcp_client_manager()
+            manager.salva_mcp_server(
                 nome=nuovo_nome,
                 tipo="local",
                 descrizione="",
                 configurazione={'comando': '', 'args': [], 'env': {}},
                 attivo=False  # I nuovi server sono inattivi di default
             )
-            
-            # NON chiamare reset(): il server è inattivo, non serve riavvio
             
             # Feedback con toast
             st.toast(f"✅ Server '{nuovo_nome}' creato! Configuralo e attivalo nel multiselect.", icon="✅")
@@ -269,13 +298,9 @@ def mostra_dialog_mcp():
         if st.button("🗑️ Elimina Server", use_container_width=True, disabled=not selected_server):
             if selected_server:
                 try:
-                    # Elimina il server dal database
-                    ConfigurazioneDB.cancella_mcp_server(selected_server)
-                    
-                    # Riavvia per fermare il processo del server eliminato
-                    # e ricaricare solo i server rimanenti
+                    # Usa il nuovo metodo del manager che gestisce anche il PID
                     manager = get_mcp_client_manager()
-                    manager.reset()
+                    manager.cancella_mcp_server(selected_server)
                     
                     # Feedback con toast
                     st.toast(f"🗑️ Server '{selected_server}' eliminato!", icon="🗑️")
@@ -313,30 +338,26 @@ def mostra_dialog_mcp():
                     # Determina lo stato attivo dal multiselect
                     servers_selezionati = st.session_state.get("mcp_servers_selezionati_temp", [])
                     
-                    # Se il nome è cambiato, aggiorna anche il multiselect
+                    manager = get_mcp_client_manager()
+                    
+                    # Se il nome è cambiato, cancella il vecchio server
                     if nome_nuovo != selected_server:
-                        ConfigurazioneDB.cancella_mcp_server(selected_server)
+                        manager.cancella_mcp_server(selected_server)
                         # Aggiorna il multiselect: rimuovi il vecchio nome e aggiungi il nuovo se era selezionato
                         if selected_server in servers_selezionati:
                             servers_selezionati.remove(selected_server)
                             servers_selezionati.append(nome_nuovo)
                             st.session_state["mcp_servers_selezionati_temp"] = servers_selezionati
                     
-                    # Salva nel database con lo stato dal multiselect
-                    # Il metodo restituisce True se la configurazione è cambiata e serve riavvio
+                    # Salva con il nuovo metodo del manager che gestisce anche il PID
                     attivo = nome_nuovo in servers_selezionati
-                    config_changed = ConfigurazioneDB.salva_mcp_server(
+                    manager.salva_mcp_server(
                         nome=nome_nuovo,
                         tipo=tipo,
                         descrizione=config_temp.get('descrizione', ''),
                         configurazione=configurazione,
                         attivo=attivo
                     )
-                    
-                    # Resetta il manager SOLO se la configurazione è cambiata
-                    if config_changed:
-                        manager = get_mcp_client_manager()
-                        manager.reset()
                     
                     # Feedback con toast
                     st.toast(f"✅ Server '{nome_nuovo}' salvato con successo!", icon="✅")
@@ -353,15 +374,6 @@ def mostra_dialog_mcp():
     if st.button("✅ Chiudi", use_container_width=True):
         _on_close_mcp_dialog()
         st.rerun()
-
-
-# Funzione legacy per compatibilità (deprecata)
-def mostra_gestione_mcp():
-    """
-    Funzione legacy per compatibilità.
-    Ora si usa mostra_dialog_mcp() invece.
-    """
-    mostra_dialog_mcp()
 
 
 # Made with Bob

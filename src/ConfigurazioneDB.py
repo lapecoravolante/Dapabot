@@ -517,15 +517,21 @@ class ConfigurazioneDB:
             # Nuovo server: se è attivo, serve riavvio
             config_changed = attivo
         else:
-            # Server esistente: confronta la configurazione
+            # Server esistente: confronta SOLO la configurazione, non lo stato
             vecchia_config = server.get_configurazione()
             vecchia_config_json = json.dumps(vecchia_config, sort_keys=True, ensure_ascii=False)
+            vecchio_stato_attivo = server.attivo
             
             # La configurazione è cambiata se:
-            # 1. Il JSON della configurazione è diverso E
-            # 2. Il server è attivo (se è inattivo, non serve riavviare)
+            # 1. Il JSON della configurazione è diverso E il server è/sarà attivo
+            # 2. OPPURE il server passa da inattivo ad attivo (serve avviarlo)
             if vecchia_config_json != nuova_config_json and attivo:
                 config_changed = True
+            elif not vecchio_stato_attivo and attivo:
+                # Server che passa da inattivo ad attivo: serve avviarlo
+                config_changed = True
+            # Nota: se il server passa da attivo a inattivo, config_changed rimane False
+            # perché il manager gestirà lo stop basandosi sul parametro attivo=False
             
             # Aggiorna il server
             server.tipo = tipo
