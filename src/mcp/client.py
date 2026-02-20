@@ -46,6 +46,34 @@ class MCPClientManager:
         self._server_configs: Dict[str, Dict[str, Any]] = {}
         self._tools_cache: List[BaseTool] = []
         self._config_hash: Optional[str] = None
+        # Traccia le configurazioni precedenti per ogni server
+        self._previous_server_configs: Dict[str, Dict[str, Any]] = {}
+    
+    def _config_changed(self, server_name: str, new_config: Dict[str, Any]) -> bool:
+        """
+        Verifica se la configurazione di un server è cambiata rispetto alla precedente.
+        
+        Args:
+            server_name: Nome del server
+            new_config: Nuova configurazione
+            
+        Returns:
+            True se la configurazione è cambiata, False altrimenti
+        """
+        import json
+        
+        # Se non abbiamo una configurazione precedente, è cambiata
+        if server_name not in self._previous_server_configs:
+            return True
+        
+        old_config = self._previous_server_configs[server_name]
+        
+        # Confronta le configurazioni serializzandole in JSON
+        # Questo gestisce correttamente liste, dizionari, ecc.
+        old_json = json.dumps(old_config, sort_keys=True)
+        new_json = json.dumps(new_config, sort_keys=True)
+        
+        return old_json != new_json
     
     def carica_configurazioni_da_db(self) -> None:
         """
@@ -98,6 +126,9 @@ class MCPClientManager:
         
         if self._client is None:
             self._client = MultiServerMCPClient(self._server_configs)
+            # Salva le configurazioni correnti come baseline per futuri confronti
+            import copy
+            self._previous_server_configs = copy.deepcopy(self._server_configs)
         
         return self._client
     
@@ -164,11 +195,36 @@ class MCPClientManager:
         return await client.get_prompt(server_name, prompt_name, arguments=arguments)
     
     def reset(self) -> None:
-        """Resetta il client e ricarica le configurazioni"""
-        self._client = None
-        self._server_configs = {}
-        self._tools_cache = []
-        self._config_hash = None
+        """
+        Resetta il client e ricarica le configurazioni.
+        Riavvia solo i server la cui configurazione è cambiata.
+        """
+        # Carica le nuove configurazioni dal database
+        self.carica_configurazioni_da_db()
+        
+        # Determina quali server devono essere riavviati
+        servers_to_restart = set()
+        
+        # Controlla i server attualmente configurati
+        for server_name, new_config in self._server_configs.items():
+            if self._config_changed(server_name, new_config):
+                servers_to_restart.add(server_name)
+        
+        # Controlla i server che sono stati rimossi
+        for server_name in self._previous_server_configs.keys():
+            if server_name not in self._server_configs:
+                servers_to_restart.add(server_name)
+        
+        # Se ci sono server da riavviare, resetta il client
+        if servers_to_restart:
+            self._client = None
+            self._tools_cache = []
+            self._config_hash = None
+            
+            # Aggiorna le configurazioni precedenti
+            import copy
+            self._previous_server_configs = copy.deepcopy(self._server_configs)
+        # Altrimenti, mantieni il client esistente (nessun riavvio necessario)
     
     def get_server_names(self) -> List[str]:
         """
