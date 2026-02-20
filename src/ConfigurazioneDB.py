@@ -483,9 +483,10 @@ class ConfigurazioneDB:
     
     @classmethod
     def salva_mcp_server(cls, nome: str, tipo: str, descrizione: str = "",
-                         configurazione: dict = None, attivo: bool = True):
+                         configurazione: dict = None, attivo: bool = True) -> bool:
         """
         Salva o aggiorna la configurazione di un server MCP.
+        Confronta la configurazione con quella esistente per determinare se serve un riavvio.
         
         Args:
             nome: Nome identificativo del server
@@ -493,8 +494,14 @@ class ConfigurazioneDB:
             descrizione: Descrizione del server
             configurazione: Dizionario con la configurazione specifica
             attivo: Se il server è attivo o meno
+            
+        Returns:
+            True se la configurazione è cambiata e serve riavviare il server, False altrimenti
         """
         cls.inizializza_db()
+        
+        config_changed = False
+        nuova_config_json = json.dumps(configurazione or {}, sort_keys=True, ensure_ascii=False)
         
         server, created = MCPServerModel.get_or_create(
             nome=nome,
@@ -506,12 +513,28 @@ class ConfigurazioneDB:
             }
         )
         
-        if not created:
+        if created:
+            # Nuovo server: se è attivo, serve riavvio
+            config_changed = attivo
+        else:
+            # Server esistente: confronta la configurazione
+            vecchia_config = server.get_configurazione()
+            vecchia_config_json = json.dumps(vecchia_config, sort_keys=True, ensure_ascii=False)
+            
+            # La configurazione è cambiata se:
+            # 1. Il JSON della configurazione è diverso E
+            # 2. Il server è attivo (se è inattivo, non serve riavviare)
+            if vecchia_config_json != nuova_config_json and attivo:
+                config_changed = True
+            
+            # Aggiorna il server
             server.tipo = tipo
             server.descrizione = descrizione
             server.set_configurazione(configurazione or {})
             server.attivo = attivo
             server.save()
+        
+        return config_changed
     
     @classmethod
     def carica_mcp_servers(cls) -> list[dict]:
@@ -558,7 +581,12 @@ class ConfigurazioneDB:
     
     @classmethod
     def cancella_mcp_server(cls, nome: str):
-        """Cancella un server MCP"""
+        """
+        Cancella un server MCP.
+        
+        Args:
+            nome: Nome del server da cancellare
+        """
         cls.inizializza_db()
         
         try:
