@@ -12,6 +12,7 @@ def _on_close_mcp_dialog():
     """
     Callback chiamato quando la dialog MCP viene chiusa.
     Aggiorna il DB con le selezioni fatte nel multiselect.
+    Riavvia per fermare i server disattivati e avviare quelli attivati.
     """
     st.session_state["mcp_dialog_open"] = False
     
@@ -20,7 +21,10 @@ def _on_close_mcp_dialog():
         servers_selezionati = st.session_state["mcp_servers_selezionati_temp"]
         ConfigurazioneDB.aggiorna_stati_mcp_servers(servers_selezionati)
         
-        # Resetta il manager MCP per ricaricare le configurazioni
+        # Riavvia per applicare i cambi di stato:
+        # - Ferma i server disattivati
+        # - Avvia i server attivati
+        # - Mantiene attivi i server già attivi
         manager = get_mcp_client_manager()
         manager.reset()
         
@@ -244,6 +248,7 @@ def mostra_dialog_mcp():
                 counter += 1
             
             # Crea un nuovo server con configurazione di default (inattivo)
+            # salva_mcp_server restituisce False perché il server è inattivo
             ConfigurazioneDB.salva_mcp_server(
                 nome=nuovo_nome,
                 tipo="local",
@@ -252,9 +257,7 @@ def mostra_dialog_mcp():
                 attivo=False  # I nuovi server sono inattivi di default
             )
             
-            # Resetta il manager
-            manager = get_mcp_client_manager()
-            manager.reset()
+            # NON chiamare reset(): il server è inattivo, non serve riavvio
             
             # Feedback con toast
             st.toast(f"✅ Server '{nuovo_nome}' creato! Configuralo e attivalo nel multiselect.", icon="✅")
@@ -266,7 +269,11 @@ def mostra_dialog_mcp():
         if st.button("🗑️ Elimina Server", use_container_width=True, disabled=not selected_server):
             if selected_server:
                 try:
+                    # Elimina il server dal database
                     ConfigurazioneDB.cancella_mcp_server(selected_server)
+                    
+                    # Riavvia per fermare il processo del server eliminato
+                    # e ricaricare solo i server rimanenti
                     manager = get_mcp_client_manager()
                     manager.reset()
                     
@@ -316,8 +323,9 @@ def mostra_dialog_mcp():
                             st.session_state["mcp_servers_selezionati_temp"] = servers_selezionati
                     
                     # Salva nel database con lo stato dal multiselect
+                    # Il metodo restituisce True se la configurazione è cambiata e serve riavvio
                     attivo = nome_nuovo in servers_selezionati
-                    ConfigurazioneDB.salva_mcp_server(
+                    config_changed = ConfigurazioneDB.salva_mcp_server(
                         nome=nome_nuovo,
                         tipo=tipo,
                         descrizione=config_temp.get('descrizione', ''),
@@ -325,9 +333,10 @@ def mostra_dialog_mcp():
                         attivo=attivo
                     )
                     
-                    # Resetta il manager
-                    manager = get_mcp_client_manager()
-                    manager.reset()
+                    # Resetta il manager SOLO se la configurazione è cambiata
+                    if config_changed:
+                        manager = get_mcp_client_manager()
+                        manager.reset()
                     
                     # Feedback con toast
                     st.toast(f"✅ Server '{nome_nuovo}' salvato con successo!", icon="✅")
