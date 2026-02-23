@@ -122,8 +122,8 @@ def mostra_dialog_mcp():
                     server = servers_dict[server_name]
                     tipo_label = server['tipo']
                     
-                    # Layout con pulsante principale e pulsante preview
-                    col_btn, col_preview = st.columns([0.75, 0.25])
+                    # Layout con 3 colonne: nome server, preview, elimina
+                    col_btn, col_preview, col_delete = st.columns([0.65, 0.20, 0.15])
                     
                     with col_btn:
                         # Pulsante che seleziona il server quando cliccato
@@ -157,11 +157,71 @@ def mostra_dialog_mcp():
                             st.session_state.mcp_selected_server = server_name
                             st.session_state.mcp_discovery_open = True
                             st.rerun()
+                    
+                    with col_delete:
+                        # Pulsante elimina inline
+                        if st.button(
+                            "❌",
+                            key=f"delete_mcp_{server_name}",
+                            help="Elimina server",
+                            use_container_width=True
+                        ):
+                            try:
+                                manager = get_mcp_client_manager()
+                                manager.cancella_mcp_server(server_name)
+                                
+                                # Feedback con toast
+                                st.toast(f"🗑️ Server '{server_name}' eliminato!", icon="🗑️")
+                                
+                                # Reset della selezione se era il server selezionato
+                                if st.session_state.get("selected_mcp_server") == server_name:
+                                    st.session_state["selected_mcp_server"] = None
+                                    st.session_state["mcp_server_config_temp"] = {}
+                                
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Errore eliminazione: {e}")
             else:
                 st.info("Nessun server trovato")
+        
+        # Pulsante "Aggiungi Nuovo Server" sotto il container
+        if st.button("➕ Aggiungi Nuovo Server", use_container_width=True, key="add_new_mcp_server"):
+            # Genera un nome univoco per il nuovo server
+            base_name = "nuovo_server"
+            counter = 1
+            nuovo_nome = base_name
+            while nuovo_nome in servers_dict:
+                nuovo_nome = f"{base_name}_{counter}"
+                counter += 1
+            
+            # Crea un nuovo server con configurazione di default (inattivo)
+            manager = get_mcp_client_manager()
+            manager.salva_mcp_server(
+                nome=nuovo_nome,
+                tipo="local",
+                descrizione="",
+                configurazione={'comando': '', 'args': [], 'env': {}},
+                attivo=False
+            )
+            
+            # Seleziona automaticamente il nuovo server e carica la sua configurazione
+            st.session_state["selected_mcp_server"] = nuovo_nome
+            st.session_state["mcp_server_config_temp"] = {
+                'nome': nuovo_nome,
+                'tipo': 'local',
+                'descrizione': '',
+                'configurazione': {'comando': '', 'args': [], 'env': {}},
+                'attivo': False
+            }
+            
+            # Feedback con toast
+            st.toast(f"✅ Server '{nuovo_nome}' creato! Configuralo e attivalo nel multiselect.", icon="✅")
+            
+            st.rerun()
     
-    # Multiselect per selezionare server attivi (dopo le colonne)
     st.divider()
+    
+    # Multiselect per selezionare server attivi
     st.subheader("🔧 Selezione Server Attivi")
     
     # Ottieni tutti i server disponibili
@@ -289,73 +349,11 @@ def mostra_dialog_mcp():
             config_temp['descrizione'] = descrizione
             config_temp['configurazione'] = configurazione
             st.session_state["mcp_server_config_temp"] = config_temp
-    
-    st.divider()
-    
-    # ==================== PULSANTI AZIONE ====================
-    col_add, col_delete, col_save = st.columns(3)
-    
-    with col_add:
-        if st.button("➕ Aggiungi Nuovo Server", use_container_width=True):
-            # Genera un nome univoco per il nuovo server
-            base_name = "nuovo_server"
-            counter = 1
-            nuovo_nome = base_name
-            while nuovo_nome in servers_dict:
-                nuovo_nome = f"{base_name}_{counter}"
-                counter += 1
             
-            # Crea un nuovo server con configurazione di default (inattivo)
-            # Usa il nuovo metodo del manager che gestisce anche il PID
-            manager = get_mcp_client_manager()
-            manager.salva_mcp_server(
-                nome=nuovo_nome,
-                tipo="local",
-                descrizione="",
-                configurazione={'comando': '', 'args': [], 'env': {}},
-                attivo=False  # I nuovi server sono inattivi di default
-            )
-            
-            # Seleziona automaticamente il nuovo server e carica la sua configurazione
-            st.session_state["selected_mcp_server"] = nuovo_nome
-            st.session_state["mcp_server_config_temp"] = {
-                'nome': nuovo_nome,
-                'tipo': 'local',
-                'descrizione': '',
-                'configurazione': {'comando': '', 'args': [], 'env': {}},
-                'attivo': False
-            }
-            
-            # Feedback con toast
-            st.toast(f"✅ Server '{nuovo_nome}' creato! Configuralo e attivalo nel multiselect.", icon="✅")
-            
-            st.rerun()
-    
-    with col_delete:
-        selected_server = st.session_state.get("selected_mcp_server")
-        if st.button("🗑️ Elimina Server", use_container_width=True, disabled=not selected_server):
-            if selected_server:
-                try:
-                    # Usa il nuovo metodo del manager che gestisce anche il PID
-                    manager = get_mcp_client_manager()
-                    manager.cancella_mcp_server(selected_server)
-                    
-                    # Feedback con toast
-                    st.toast(f"🗑️ Server '{selected_server}' eliminato!", icon="🗑️")
-                    
-                    # Reset della selezione
-                    st.session_state["selected_mcp_server"] = None
-                    st.session_state["mcp_server_config_temp"] = {}
-                    
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Errore eliminazione: {e}")
-    
-    with col_save:
-        selected_server = st.session_state.get("selected_mcp_server")
-        if st.button("💾 Salva", type="primary", use_container_width=True, disabled=not selected_server):
-            if selected_server:
-                config_temp = st.session_state["mcp_server_config_temp"]
+            # ==================== PULSANTE SALVA ====================
+            # Posizionato in fondo al form di configurazione
+            st.divider()
+            if st.button("💾 Salva", type="primary", use_container_width=True, key="save_mcp_config"):
                 nome_nuovo = config_temp.get('nome', '').strip()
                 tipo = config_temp.get('tipo')
                 configurazione = config_temp.get('configurazione', {})
@@ -405,8 +403,6 @@ def mostra_dialog_mcp():
                     st.session_state["mcp_server_config_temp"] = {}
                     
                     st.rerun()
-    
-    st.divider()
     
     # ==================== PULSANTE CHIUDI ====================
     if st.button("✅ Chiudi", use_container_width=True):
