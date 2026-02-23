@@ -27,9 +27,5 @@ dependencies = [
     "streamlit>=1.51.0",
     "uv>=0.10.2",
     "validators>=0.35.0",
-<<<<<<< HEAD
-    "langchain-mcp-adapters>=0.1.0",
-=======
     "fastmcp>=3.0.0",
->>>>>>> dev
 ]
