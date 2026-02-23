@@ -1,76 +1,69 @@
 """
-Client MCP semplificato usando langchain-mcp-adapters per i tools
-e SDK nativo MCP per discovery di risorse e prompt
+Client MCP unificato usando mcp-use per tools, risorse e prompt.
+Sostituisce completamente langchain-mcp-adapters e l'SDK nativo MCP.
 """
 
 from typing import Dict, Any, List, Optional, Tuple
 import asyncio
 import threading
-from functools import wraps
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_core.tools import BaseTool, StructuredTool
+import hashlib
+import json
+import logging
+from mcp_use import MCPClient
+from langchain_core.tools import BaseTool
 from src.ConfigurazioneDB import ConfigurazioneDB
+from src.mcp.langchain_adapter import MCPLangChainAdapter
 
-# Import SDK nativo MCP per discovery
-from mcp import ClientSession
-from mcp.client.stdio import stdio_client, StdioServerParameters
-from mcp.client.sse import sse_client
-import httpx
-
-
-def async_to_sync_tool(async_tool: BaseTool) -> BaseTool:
-    """
-    Converte un tool async in un tool sincrono wrappando la funzione.
-    Necessario perché langchain-mcp-adapters ritorna tools async.
-    """
-    if not hasattr(async_tool, 'coroutine'):
-        # Tool già sincrono
-        return async_tool
+# Configura un handler per catturare i log di mcp-use
+class MCPErrorHandler(logging.Handler):
+    """Handler personalizzato per catturare errori da mcp-use"""
+    def __init__(self):
+        super().__init__()
+        self.errors = []
     
-    # Wrapper sincrono per la coroutine
-    @wraps(async_tool.coroutine)
-    def sync_wrapper(*args, **kwargs):
-        return asyncio.run(async_tool.coroutine(*args, **kwargs))
+    def emit(self, record):
+        if record.levelno >= logging.ERROR:
+            self.errors.append(record.getMessage())
     
-    # Crea un nuovo StructuredTool sincrono
-    return StructuredTool(
-        name=async_tool.name,
-        description=async_tool.description,
-        func=sync_wrapper,
-        args_schema=async_tool.args_schema if hasattr(async_tool, 'args_schema') else None
-    )
+    def clear(self):
+        self.errors = []
+    
+    def get_errors(self):
+        return self.errors.copy()
+
+# Crea un'istanza globale del handler
+_mcp_error_handler = MCPErrorHandler()
+_mcp_logger = logging.getLogger('mcp_use')
+_mcp_logger.addHandler(_mcp_error_handler)
 
 
 class MCPClientManager:
     """
-    Gestisce i client MCP usando langchain-mcp-adapters.
+    Gestisce i client MCP usando mcp-use.
     Fornisce un'interfaccia semplificata per caricare configurazioni dal database
-    e ottenere tools per gli agenti LangChain.
+    e ottenere tools, risorse e prompt per gli agenti LangChain.
     """
     
     def __init__(self):
         """Inizializza il manager"""
-        self._client: Optional[MultiServerMCPClient] = None
+        self._client: Optional[MCPClient] = None
+        self._adapter: Optional[MCPLangChainAdapter] = None
         self._server_configs: Dict[str, Dict[str, Any]] = {}
-        self._tools_cache: List[BaseTool] = []
+        self._all_tools_cache: List[BaseTool] = []
         self._config_hash: Optional[str] = None
         # Stato del riavvio in background
         self._restart_in_progress: bool = False
         self._restart_thread: Optional[threading.Thread] = None
-        # Cache per discovery di risorse e prompt (SDK nativo)
-        self._resources_cache: Dict[str, List[Dict[str, Any]]] = {}
-        self._prompts_cache: Dict[str, List[Dict[str, Any]]] = {}
-        self._discovery_cache_hash: Optional[str] = None
     
     def carica_configurazioni_da_db(self) -> None:
         """
         Carica le configurazioni dei server MCP attivi dal database
-        e le prepara per MultiServerMCPClient.
+        e le prepara per MCPClient.
         NON resetta il client se le configurazioni non sono cambiate.
         """
         servers_attivi = ConfigurazioneDB.carica_mcp_servers_attivi()
         
-        # Costruisci le nuove configurazioni
+        # Costruisci le nuove configurazioni nel formato mcp-use
         new_server_configs = {}
         
         for server in servers_attivi:
@@ -81,30 +74,34 @@ class MCPClientManager:
             if tipo == 'local':
                 # Configurazione per server locale (stdio)
                 new_server_configs[nome] = {
-                    'transport': 'stdio',
                     'command': config.get('comando', ''),
                     'args': config.get('args', []),
                     'env': config.get('env', {})
                 }
             elif tipo == 'remote':
-                # Configurazione per server remoto (HTTP)
+                # Configurazione per server remoto (HTTP/SSE)
                 server_config = {
-                    'transport': 'http',
                     'url': config.get('url', '')
                 }
                 
                 # Aggiungi headers se presenti
                 headers = config.get('headers', {})
-                if config.get('api_key'):
-                    headers['Authorization'] = f"Bearer {config['api_key']}"
-                
                 if headers:
                     server_config['headers'] = headers
+                
+                # Gestione autenticazione
+                if config.get('api_key'):
+                    # Bearer token authentication
+                    server_config['auth'] = config['api_key']
+                elif config.get('oauth_config'):
+                    # OAuth configuration
+                    server_config['auth'] = config['oauth_config']
+                # Se non c'è né api_key né oauth_config, NON aggiungere 'auth'
+                # mcp-use tratterà il server come pubblico (no auth)
                 
                 new_server_configs[nome] = server_config
         
         # Confronta con le configurazioni esistenti
-        import json
         old_config_json = json.dumps(self._server_configs, sort_keys=True)
         new_config_json = json.dumps(new_server_configs, sort_keys=True)
         
@@ -113,18 +110,19 @@ class MCPClientManager:
             self._server_configs = new_server_configs
             # Resetta il client per forzare la riconnessione con le nuove configurazioni
             self._client = None
-            self._tools_cache = []
+            self._adapter = None
+            self._all_tools_cache = []
             self._config_hash = None
-            # Invalida anche la cache di discovery
-            self.invalidate_discovery_cache()
+            # NON pulire gli errori qui! Verranno puliti in get_all_as_langchain_tools()
+            # quando effettivamente ricarica i tools
     
-    def get_client(self) -> MultiServerMCPClient:
+    def get_client(self) -> MCPClient:
         """
         Ottiene o crea il client MCP con le configurazioni caricate.
         Se un riavvio è in corso, aspetta che finisca prima di restituire il client.
         
         Returns:
-            Istanza di MultiServerMCPClient
+            Istanza di MCPClient
         """
         # Se un riavvio è in corso, aspetta che finisca
         if self._restart_in_progress and self._restart_thread:
@@ -134,71 +132,132 @@ class MCPClientManager:
             self.carica_configurazioni_da_db()
         
         if self._client is None:
-            self._client = MultiServerMCPClient(self._server_configs)
+            # Crea configurazione nel formato mcp-use
+            config = {"mcpServers": self._server_configs}
+            self._client = MCPClient(config=config)
         
         return self._client
     
-    async def get_tools(self) -> List[BaseTool]:
+    def get_adapter(self) -> MCPLangChainAdapter:
         """
-        Ottiene tutti i tools dai server MCP configurati.
-        Converte i tools async in sincroni per compatibilità con LangChain.
+        Ottiene o crea l'adapter LangChain.
+        
+        Returns:
+            Istanza di MCPLangChainAdapter
+        """
+        if self._adapter is None:
+            self._adapter = MCPLangChainAdapter()
+        return self._adapter
+    
+    async def get_all_as_langchain_tools(self) -> Tuple[List[BaseTool], List[str]]:
+        """
+        Ottiene tutti i tools, risorse e prompt dai server MCP configurati
+        come lista unificata di tools LangChain.
         Usa caching per evitare di ricreare i tools ad ogni chiamata.
         
         Returns:
-            Lista di tools LangChain sincroni pronti per l'uso con gli agenti
+            Tupla (tools, errors) dove:
+            - tools: Lista di tools LangChain sincroni (tools + risorse + prompt)
+            - errors: Lista di messaggi di errore (vuota se nessun errore)
         """
         # Calcola hash della configurazione per invalidare cache se cambia
-        import hashlib
-        import json
         config_str = json.dumps(self._server_configs, sort_keys=True)
         current_hash = hashlib.md5(config_str.encode()).hexdigest()
         
         # Se la configurazione non è cambiata e abbiamo una cache, usala
-        if self._config_hash == current_hash and self._tools_cache:
-            return self._tools_cache
+        if self._config_hash == current_hash and self._all_tools_cache:
+            # Ritorna cache con errori vuoti (già gestiti al caricamento precedente)
+            return self._all_tools_cache, []
         
-        # Altrimenti ricarica i tools
+        # Altrimenti ricarica tutto
+        # Pulisci gli errori precedenti
+        _mcp_error_handler.clear()
+        
         client = self.get_client()
-        async_tools = await client.get_tools()
+        adapter = self.get_adapter()
         
-        # Converti tutti i tools async in sincroni
-        sync_tools = [async_to_sync_tool(tool) for tool in async_tools]
+        # Crea tutti i tools, risorse e prompt
+        await adapter.create_all(client)
+        
+        # Ottieni la lista unificata
+        all_tools = adapter.all_tools
+        
+        # Ottieni gli errori catturati durante il caricamento
+        errors = _mcp_error_handler.get_errors()
         
         # Aggiorna cache
-        self._tools_cache = sync_tools
+        self._all_tools_cache = all_tools
         self._config_hash = current_hash
         
-        return sync_tools
+        # Ritorna tools ed errori separatamente
+        return all_tools, errors
     
-    async def get_resources(self, server_name: str, uris: Optional[List[str]] = None) -> List[Any]:
+    async def get_tools_only(self) -> List[BaseTool]:
         """
-        Ottiene le risorse da un server MCP specifico.
+        Ottiene solo i tools (esclude risorse e prompt).
         
-        Args:
-            server_name: Nome del server MCP
-            uris: Lista opzionale di URI specifici da caricare
-            
         Returns:
-            Lista di Blob objects con le risorse
+            Lista di tools LangChain
         """
         client = self.get_client()
-        return await client.get_resources(server_name, uris=uris)
+        adapter = self.get_adapter()
+        await adapter.create_tools(client)
+        return adapter.tools
     
-    async def get_prompt(self, server_name: str, prompt_name: str, 
-                        arguments: Optional[Dict[str, Any]] = None) -> List[Any]:
+    async def get_resources_only(self) -> List[BaseTool]:
         """
-        Ottiene un prompt da un server MCP specifico.
+        Ottiene solo le risorse (come tools LangChain).
         
-        Args:
-            server_name: Nome del server MCP
-            prompt_name: Nome del prompt
-            arguments: Argomenti opzionali per il prompt
-            
         Returns:
-            Lista di messaggi LangChain
+            Lista di risorse convertite in tools LangChain
         """
         client = self.get_client()
-        return await client.get_prompt(server_name, prompt_name, arguments=arguments)
+        adapter = self.get_adapter()
+        await adapter.create_resources(client)
+        return adapter.resources
+    
+    async def get_prompts_only(self) -> List[BaseTool]:
+        """
+        Ottiene solo i prompt (come tools LangChain).
+        
+        Returns:
+            Lista di prompt convertiti in tools LangChain
+        """
+        client = self.get_client()
+        adapter = self.get_adapter()
+        await adapter.create_prompts(client)
+        return adapter.prompts
+    
+    async def get_preview_info(self) -> Dict[str, Dict[str, int]]:
+        """
+        Ottiene informazioni di preview su tools, risorse e prompt
+        per ogni server configurato.
+        
+        Returns:
+            Dizionario con conteggi per server:
+            {
+                'server_name': {
+                    'tools': 5,
+                    'resources': 3,
+                    'prompts': 2
+                }
+            }
+        """
+        client = self.get_client()
+        adapter = self.get_adapter()
+        
+        # Crea tutto per ottenere i conteggi
+        await adapter.create_all(client)
+        
+        # Per ora ritorniamo conteggi globali
+        # TODO: mcp-use potrebbe non fornire info per-server facilmente
+        return {
+            'total': {
+                'tools': adapter.get_tools_count(),
+                'resources': adapter.get_resources_count(),
+                'prompts': adapter.get_prompts_count()
+            }
+        }
     
     def _do_restart(self) -> None:
         """
@@ -208,10 +267,9 @@ class MCPClientManager:
         try:
             # Resetta il client
             self._client = None
-            self._tools_cache = []
+            self._adapter = None
+            self._all_tools_cache = []
             self._config_hash = None
-            # Invalida anche la cache di discovery
-            self.invalidate_discovery_cache()
         finally:
             # Marca il riavvio come completato
             self._restart_in_progress = False
@@ -301,185 +359,13 @@ class MCPClientManager:
         # Forza il ricaricamento delle configurazioni
         self.carica_configurazioni_da_db()
     
-    async def _create_native_session(self, server_name: str) -> Optional[Tuple[ClientSession, Any]]:
+    def invalidate_cache(self) -> None:
         """
-        Crea una sessione nativa MCP per un server specifico.
-        Supporta sia server locali (stdio) che remoti (HTTP).
-        
-        Args:
-            server_name: Nome del server MCP
-            
-        Returns:
-            Tupla (ClientSession, context_manager) o None se il server non esiste
-        """
-        if server_name not in self._server_configs:
-            return None
-        
-        config = self._server_configs[server_name]
-        transport = config.get('transport', 'stdio')
-        
-        if transport == 'stdio':
-            # Server locale con stdio
-            server_params = StdioServerParameters(
-                command=config.get('command', ''),
-                args=config.get('args', []),
-                env=config.get('env', {})
-            )
-            
-            context = stdio_client(server_params)
-            read, write = await context.__aenter__()
-            session = ClientSession(read, write)
-            await session.__aenter__()
-            await session.initialize()
-            
-            return session, context
-            
-        elif transport == 'http':
-            # Server remoto con SSE
-            url = config.get('url', '')
-            headers = config.get('headers', {})
-            
-            # Crea client HTTP con headers personalizzati
-            http_client = httpx.AsyncClient(headers=headers)
-            
-            context = sse_client(url, http_client=http_client)
-            read, write = await context.__aenter__()
-            session = ClientSession(read, write)
-            await session.__aenter__()
-            await session.initialize()
-            
-            return session, context
-        
-        return None
-    
-    async def list_available_resources(self, server_name: str, use_cache: bool = True) -> List[Dict[str, Any]]:
-        """
-        Elenca tutte le risorse disponibili da un server MCP usando l'SDK nativo.
-        
-        Args:
-            server_name: Nome del server MCP
-            use_cache: Se True, usa la cache se disponibile
-            
-        Returns:
-            Lista di dizionari con informazioni sulle risorse:
-            [{'uri': str, 'name': str, 'description': str, 'mimeType': str}, ...]
-        """
-        # Calcola hash della configurazione per invalidare cache
-        import hashlib
-        import json
-        config_str = json.dumps(self._server_configs, sort_keys=True)
-        current_hash = hashlib.md5(config_str.encode()).hexdigest()
-        
-        # Usa cache se disponibile e richiesta
-        if use_cache and self._discovery_cache_hash == current_hash:
-            if server_name in self._resources_cache:
-                return self._resources_cache[server_name]
-        
-        # Altrimenti interroga il server
-        session_tuple = await self._create_native_session(server_name)
-        if not session_tuple:
-            return []
-        
-        session, context = session_tuple
-        
-        try:
-            # Lista le risorse disponibili
-            result = await session.list_resources()
-            
-            # Converti in formato semplice
-            resources = []
-            for resource in result.resources:
-                resources.append({
-                    'uri': str(resource.uri),
-                    'name': resource.name,
-                    'description': resource.description or '',
-                    'mimeType': resource.mimeType or ''
-                })
-            
-            # Aggiorna cache
-            self._resources_cache[server_name] = resources
-            self._discovery_cache_hash = current_hash
-            
-            return resources
-            
-        finally:
-            # Chiudi la sessione
-            await session.__aexit__(None, None, None)
-            await context.__aexit__(None, None, None)
-    
-    async def list_available_prompts(self, server_name: str, use_cache: bool = True) -> List[Dict[str, Any]]:
-        """
-        Elenca tutti i prompt disponibili da un server MCP usando l'SDK nativo.
-        
-        Args:
-            server_name: Nome del server MCP
-            use_cache: Se True, usa la cache se disponibile
-            
-        Returns:
-            Lista di dizionari con informazioni sui prompt:
-            [{'name': str, 'description': str, 'arguments': [...]}, ...]
-        """
-        # Calcola hash della configurazione per invalidare cache
-        import hashlib
-        import json
-        config_str = json.dumps(self._server_configs, sort_keys=True)
-        current_hash = hashlib.md5(config_str.encode()).hexdigest()
-        
-        # Usa cache se disponibile e richiesta
-        if use_cache and self._discovery_cache_hash == current_hash:
-            if server_name in self._prompts_cache:
-                return self._prompts_cache[server_name]
-        
-        # Altrimenti interroga il server
-        session_tuple = await self._create_native_session(server_name)
-        if not session_tuple:
-            return []
-        
-        session, context = session_tuple
-        
-        try:
-            # Lista i prompt disponibili
-            result = await session.list_prompts()
-            
-            # Converti in formato semplice
-            prompts = []
-            for prompt in result.prompts:
-                prompt_info = {
-                    'name': prompt.name,
-                    'description': prompt.description or '',
-                    'arguments': []
-                }
-                
-                # Aggiungi informazioni sugli argomenti se presenti
-                if prompt.arguments:
-                    for arg in prompt.arguments:
-                        prompt_info['arguments'].append({
-                            'name': arg.name,
-                            'description': arg.description or '',
-                            'required': arg.required
-                        })
-                
-                prompts.append(prompt_info)
-            
-            # Aggiorna cache
-            self._prompts_cache[server_name] = prompts
-            self._discovery_cache_hash = current_hash
-            
-            return prompts
-            
-        finally:
-            # Chiudi la sessione
-            await session.__aexit__(None, None, None)
-            await context.__aexit__(None, None, None)
-    
-    def invalidate_discovery_cache(self) -> None:
-        """
-        Invalida la cache di discovery (risorse e prompt).
+        Invalida la cache di tools/risorse/prompt.
         Utile quando si sa che le configurazioni sono cambiate.
         """
-        self._resources_cache = {}
-        self._prompts_cache = {}
-        self._discovery_cache_hash = None
+        self._all_tools_cache = []
+        self._config_hash = None
 
 
 # Istanza singleton globale

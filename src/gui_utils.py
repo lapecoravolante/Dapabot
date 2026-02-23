@@ -274,15 +274,26 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
                     risultato['errors'].append(error_msg)
                     st.toast(f"⚠️ {error_msg}", icon="⚠️")
     
-    # Carica i tools MCP se il toggle è attivo
+    # Carica tools, risorse e prompt MCP se il toggle è attivo
     if st.session_state.get("mcp_enabled", False):
         try:
             manager = get_mcp_client_manager()
             manager.carica_configurazioni_da_db()
-            mcp_tools = asyncio.run(manager.get_tools())
-            tools_to_use.extend(mcp_tools)
+            # Usa il nuovo metodo unificato che ritorna (tools, errors)
+            mcp_all_tools, mcp_errors = asyncio.run(manager.get_all_as_langchain_tools())
+            
+            # Aggiungi gli errori MCP alla lista degli errori
+            if mcp_errors:
+                for error in mcp_errors:
+                    error_msg = f"Errore MCP: {error}"
+                    risultato['errors'].append(error_msg)
+                    st.toast(f"⚠️ {error_msg}", icon="⚠️")
+            
+            # Aggiungi i tools caricati (anche se ci sono errori parziali)
+            if mcp_all_tools:
+                tools_to_use.extend(mcp_all_tools)
         except Exception as e:
-            error_msg = f"Errore caricamento tools MCP: {str(e)}"
+            error_msg = f"Errore caricamento MCP (tools/risorse/prompt): {str(e)}"
             risultato['errors'].append(error_msg)
             st.toast(f"⚠️ {error_msg}", icon="⚠️")
     
@@ -508,14 +519,6 @@ def crea_sidebar(providers: dict[str, Provider]):
                 
                 # Ricarica i tools attivi solo nel provider corrente
                 risultato = _carica_tools_nei_provider(provider_name=provider_scelto)
-                
-                # Salva gli errori in session_state per mostrarli all'utente
-                if risultato['errors']:
-                    st.session_state["tools_loading_errors"] = risultato['errors']
-                else:
-                    # Rimuovi eventuali errori precedenti
-                    if "tools_loading_errors" in st.session_state:
-                        del st.session_state["tools_loading_errors"]
             
             # Toggle Modalità agentica
             modalita_agentica = st.toggle("Abilita Modalità Agentica", value=st.session_state[provider_scelto][agentic_key],
@@ -531,11 +534,6 @@ def crea_sidebar(providers: dict[str, Provider]):
                 
                 # Ricarica i tools quando MCP viene attivato/disattivato
                 risultato = _carica_tools_nei_provider(provider_name=provider_scelto)
-                if risultato['errors']:
-                    st.session_state["tools_loading_errors"] = risultato['errors']
-                else:
-                    if "tools_loading_errors" in st.session_state:
-                        del st.session_state["tools_loading_errors"]
             
             # MCP richiede modalità agentica, quindi disabilita il toggle se agentica è off
             mcp_disabled = not modalita_agentica
@@ -585,12 +583,6 @@ def crea_sidebar(providers: dict[str, Provider]):
                             st.write(f"{tipo_icon} **{server['nome']}** ({server['tipo']})")
                 else:
                     st.info("ℹ️ Nessun server MCP attivo. Configura e attiva i server dalla finestra MCP.")
-            
-            # Mostra eventuali errori di caricamento dei tools
-            if "tools_loading_errors" in st.session_state:
-                with st.expander("⚠️ Errori di caricamento tools", expanded=True):
-                    for error in st.session_state["tools_loading_errors"]:
-                        st.error(error, icon="❌")
             
         # Sezione RAG
         with st.expander("🔎 RAG", expanded=bool(st.session_state[provider_scelto][rag_enabled_key])):
@@ -749,7 +741,7 @@ def crea_sidebar(providers: dict[str, Provider]):
         with col_db:
             # Link per gestione avanzata DB config.db
             # sqlite-web viene avviato automaticamente all'avvio dell'applicazione
-            url = "http://127.0.0.1:8080"
+            url = "http://127.0.0.1:6969"
             st.markdown(
                 f'<a href="{url}" target="_blank">'
                 '<button style="width:100%; padding:8px; font-size:1rem; border:1px solid #ccc; border-radius:4px; cursor:pointer; background-color:white;">'

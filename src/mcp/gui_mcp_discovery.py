@@ -1,6 +1,6 @@
 """
-GUI per il discovery di risorse e prompt MCP.
-Implementa un dialog con tabs per esplorare e utilizzare risorse e prompt dai server MCP.
+GUI per il discovery di tools, risorse e prompt MCP.
+Implementa un dialog con tabs per esplorare cosa offre ogni server MCP prima di attivarlo.
 """
 
 import streamlit as st
@@ -21,54 +21,33 @@ def _init_discovery_state():
     if "mcp_selected_server" not in st.session_state:
         st.session_state.mcp_selected_server = None
     
-    if "mcp_selected_resources" not in st.session_state:
-        st.session_state.mcp_selected_resources = []
-    
-    if "mcp_selected_prompt" not in st.session_state:
-        st.session_state.mcp_selected_prompt = None
-    
-    if "mcp_recent_resources" not in st.session_state:
-        st.session_state.mcp_recent_resources = []
-    
-    if "mcp_recent_prompts" not in st.session_state:
-        st.session_state.mcp_recent_prompts = []
+    if "mcp_preview_data" not in st.session_state:
+        st.session_state.mcp_preview_data = {}
     
     if "mcp_search_query" not in st.session_state:
         st.session_state.mcp_search_query = ""
-
-
-def _add_to_recent(item: Dict[str, Any], item_type: str, max_recent: int = 5):
-    """Aggiunge un elemento alla lista dei recenti"""
-    recent_key = f"mcp_recent_{item_type}s"
-    recent_list = st.session_state.get(recent_key, [])
-    
-    # Rimuovi duplicati
-    recent_list = [r for r in recent_list if r.get('id') != item.get('id')]
-    
-    # Aggiungi in testa
-    recent_list.insert(0, item)
-    
-    # Mantieni solo gli ultimi N
-    st.session_state[recent_key] = recent_list[:max_recent]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Funzioni di ricerca
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _search_items(items: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
-    """Filtra gli elementi in base alla query di ricerca"""
+def _search_tools(tools: List[Any], query: str) -> List[Any]:
+    """Filtra i tools in base alla query di ricerca"""
     if not query:
-        return items
+        return tools
     
     query_lower = query.lower()
     filtered = []
     
-    for item in items:
-        # Cerca in nome, descrizione e URI (se presente)
-        searchable_text = f"{item.get('name', '')} {item.get('description', '')} {item.get('uri', '')}".lower()
+    for tool in tools:
+        # Cerca in nome e descrizione
+        name = getattr(tool, 'name', '')
+        description = getattr(tool, 'description', '')
+        searchable_text = f"{name} {description}".lower()
+        
         if query_lower in searchable_text:
-            filtered.append(item)
+            filtered.append(tool)
     
     return filtered
 
@@ -95,106 +74,110 @@ def _render_server_list(servers: List[str]) -> Optional[str]:
     return selected
 
 
-def _render_resource_item(resource: Dict[str, Any], index: int):
-    """Renderizza un singolo elemento risorsa"""
-    col1, col2 = st.columns([0.9, 0.1])
+def _render_tool_item(tool: Any, index: int, tool_type: str):
+    """
+    Renderizza un singolo elemento (tool, risorsa o prompt).
     
-    with col1:
-        with st.expander(f"📄 {resource['name']}", expanded=False):
-            st.write(f"**URI**: `{resource['uri']}`")
-            if resource.get('description'):
-                st.write(f"**Descrizione**: {resource['description']}")
-            if resource.get('mimeType'):
-                st.write(f"**Tipo**: {resource['mimeType']}")
+    Args:
+        tool: Tool LangChain da visualizzare
+        index: Indice per chiavi univoche
+        tool_type: Tipo ('tool', 'resource', 'prompt')
+    """
+    # Icone per tipo
+    icons = {
+        'tool': '🔧',
+        'resource': '📄',
+        'prompt': '💬'
+    }
+    icon = icons.get(tool_type, '🔹')
     
-    with col2:
-        if st.button("📎", key=f"attach_resource_{index}", help="Allega al prossimo messaggio"):
-            resource_id = f"{resource['uri']}_{resource['name']}"
-            resource_with_id = {**resource, 'id': resource_id}
-            
-            # Aggiungi alla selezione corrente
-            if resource_with_id not in st.session_state.mcp_selected_resources:
-                st.session_state.mcp_selected_resources.append(resource_with_id)
-            
-            # Aggiungi ai recenti
-            _add_to_recent(resource_with_id, 'resource')
-            
-            st.success(f"✓ Risorsa '{resource['name']}' allegata", icon="✅")
-            st.rerun()
+    name = getattr(tool, 'name', 'Unknown')
+    description = getattr(tool, 'description', 'Nessuna descrizione disponibile')
+    
+    with st.expander(f"{icon} {name}", expanded=False):
+        st.write(f"**Descrizione**: {description}")
+        
+        # Mostra schema argomenti se disponibile
+        if hasattr(tool, 'args_schema') and tool.args_schema:
+            st.write("**Argomenti**:")
+            try:
+                # Prova a ottenere lo schema
+                if hasattr(tool.args_schema, 'schema'):
+                    schema = tool.args_schema.schema()
+                    properties = schema.get('properties', {})
+                    required = schema.get('required', [])
+                    
+                    for arg_name, arg_info in properties.items():
+                        is_required = "✓ obbligatorio" if arg_name in required else "○ opzionale"
+                        arg_desc = arg_info.get('description', '')
+                        arg_type = arg_info.get('type', 'any')
+                        st.write(f"- `{arg_name}` ({arg_type}, {is_required}): {arg_desc}")
+            except Exception:
+                st.caption("Schema argomenti non disponibile")
 
 
-def _render_prompt_item(prompt: Dict[str, Any], index: int, server_name: str):
-    """Renderizza un singolo elemento prompt"""
-    col1, col2 = st.columns([0.9, 0.1])
+def _render_tools_tab(tools: List[Any]):
+    """Renderizza il tab dei tools"""
+    st.subheader("🔧 Tools")
     
-    with col1:
-        with st.expander(f"💬 {prompt['name']}", expanded=False):
-            if prompt.get('description'):
-                st.write(f"**Descrizione**: {prompt['description']}")
-            
-            if prompt.get('arguments'):
-                st.write("**Argomenti**:")
-                for arg in prompt['arguments']:
-                    required = "✓ obbligatorio" if arg['required'] else "○ opzionale"
-                    st.write(f"- `{arg['name']}` ({required}): {arg.get('description', '')}")
+    # Barra di ricerca
+    search_query = st.text_input(
+        "🔍 Cerca tools",
+        value=st.session_state.mcp_search_query,
+        key="tool_search",
+        placeholder="Cerca per nome o descrizione..."
+    )
+    st.session_state.mcp_search_query = search_query
     
-    with col2:
-        if st.button("✨", key=f"use_prompt_{index}", help="Usa come messaggio di sistema"):
-            prompt_id = f"{server_name}_{prompt['name']}"
-            prompt_with_id = {**prompt, 'id': prompt_id, 'server': server_name}
-            
-            # Imposta come prompt selezionato
-            st.session_state.mcp_selected_prompt = prompt_with_id
-            
-            # Aggiungi ai recenti
-            _add_to_recent(prompt_with_id, 'prompt')
-            
-            st.success(f"✓ Prompt '{prompt['name']}' impostato", icon="✅")
-            st.rerun()
+    # Applica filtro di ricerca
+    filtered_tools = _search_tools(tools, search_query)
+    
+    if not filtered_tools:
+        if search_query:
+            st.info(f"Nessun tool trovato per '{search_query}'")
+        else:
+            st.info("Nessun tool disponibile")
+    else:
+        st.write(f"**{len(filtered_tools)} tools trovati**")
+        
+        # Renderizza ogni tool
+        for idx, tool in enumerate(filtered_tools):
+            _render_tool_item(tool, idx, 'tool')
 
 
-def _render_resources_tab(server_name: str):
+def _render_resources_tab(resources: List[Any]):
     """Renderizza il tab delle risorse"""
-    st.subheader(f"Risorse di {server_name}")
+    st.subheader("📄 Risorse")
     
     # Barra di ricerca
     search_query = st.text_input(
         "🔍 Cerca risorse",
         value=st.session_state.mcp_search_query,
         key="resource_search",
-        placeholder="Cerca per nome, descrizione o URI..."
+        placeholder="Cerca per nome o descrizione..."
     )
     st.session_state.mcp_search_query = search_query
     
-    # Carica risorse
-    manager = get_mcp_client_manager()
+    # Applica filtro di ricerca
+    filtered_resources = _search_tools(resources, search_query)
     
-    with st.spinner("Caricamento risorse..."):
-        try:
-            resources = asyncio.run(manager.list_available_resources(server_name))
-            
-            # Applica filtro di ricerca
-            filtered_resources = _search_items(resources, search_query)
-            
-            if not filtered_resources:
-                if search_query:
-                    st.info(f"Nessuna risorsa trovata per '{search_query}'")
-                else:
-                    st.info("Nessuna risorsa disponibile")
-            else:
-                st.write(f"**{len(filtered_resources)} risorse trovate**")
-                
-                # Renderizza ogni risorsa
-                for idx, resource in enumerate(filtered_resources):
-                    _render_resource_item(resource, idx)
-                    
-        except Exception as e:
-            st.error(f"Errore nel caricamento risorse: {e}")
+    if not filtered_resources:
+        if search_query:
+            st.info(f"Nessuna risorsa trovata per '{search_query}'")
+        else:
+            st.info("Nessuna risorsa disponibile")
+    else:
+        st.write(f"**{len(filtered_resources)} risorse trovate**")
+        st.caption("Le risorse sono esposte come tools che l'agent può chiamare per ottenere contenuti.")
+        
+        # Renderizza ogni risorsa
+        for idx, resource in enumerate(filtered_resources):
+            _render_tool_item(resource, idx, 'resource')
 
 
-def _render_prompts_tab(server_name: str):
+def _render_prompts_tab(prompts: List[Any]):
     """Renderizza il tab dei prompt"""
-    st.subheader(f"Prompt di {server_name}")
+    st.subheader("💬 Prompt")
     
     # Barra di ricerca
     search_query = st.text_input(
@@ -205,110 +188,82 @@ def _render_prompts_tab(server_name: str):
     )
     st.session_state.mcp_search_query = search_query
     
-    # Carica prompt
-    manager = get_mcp_client_manager()
+    # Applica filtro di ricerca
+    filtered_prompts = _search_tools(prompts, search_query)
     
-    with st.spinner("Caricamento prompt..."):
-        try:
-            prompts = asyncio.run(manager.list_available_prompts(server_name))
-            
-            # Applica filtro di ricerca
-            filtered_prompts = _search_items(prompts, search_query)
-            
-            if not filtered_prompts:
-                if search_query:
-                    st.info(f"Nessun prompt trovato per '{search_query}'")
-                else:
-                    st.info("Nessun prompt disponibile")
-            else:
-                st.write(f"**{len(filtered_prompts)} prompt trovati**")
-                
-                # Renderizza ogni prompt
-                for idx, prompt in enumerate(filtered_prompts):
-                    _render_prompt_item(prompt, idx, server_name)
-                    
-        except Exception as e:
-            st.error(f"Errore nel caricamento prompt: {e}")
+    if not filtered_prompts:
+        if search_query:
+            st.info(f"Nessun prompt trovato per '{search_query}'")
+        else:
+            st.info("Nessun prompt disponibile")
+    else:
+        st.write(f"**{len(filtered_prompts)} prompt trovati**")
+        st.caption("I prompt sono esposti come tools che l'agent può chiamare per ottenere template di messaggi.")
+        
+        # Renderizza ogni prompt
+        for idx, prompt in enumerate(filtered_prompts):
+            _render_tool_item(prompt, idx, 'prompt')
 
 
-def _render_recent_items():
-    """Renderizza la sezione degli elementi recenti"""
-    st.subheader("📌 Usati di recente")
+def _render_summary_info(tools_count: int, resources_count: int, prompts_count: int):
+    """Renderizza il riepilogo delle informazioni"""
+    st.divider()
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.write("**Risorse**")
-        recent_resources = st.session_state.get('mcp_recent_resources', [])
-        if recent_resources:
-            for idx, resource in enumerate(recent_resources[:3]):
-                if st.button(
-                    f"📄 {resource['name'][:30]}...",
-                    key=f"recent_resource_{idx}",
-                    use_container_width=True
-                ):
-                    if resource not in st.session_state.mcp_selected_resources:
-                        st.session_state.mcp_selected_resources.append(resource)
-                        st.success(f"✓ Risorsa allegata", icon="✅")
-                        st.rerun()
-        else:
-            st.caption("Nessuna risorsa recente")
+        st.metric("🔧 Tools", tools_count)
     
     with col2:
-        st.write("**Prompt**")
-        recent_prompts = st.session_state.get('mcp_recent_prompts', [])
-        if recent_prompts:
-            for idx, prompt in enumerate(recent_prompts[:3]):
-                if st.button(
-                    f"💬 {prompt['name'][:30]}...",
-                    key=f"recent_prompt_{idx}",
-                    use_container_width=True
-                ):
-                    st.session_state.mcp_selected_prompt = prompt
-                    st.success(f"✓ Prompt impostato", icon="✅")
-                    st.rerun()
-        else:
-            st.caption("Nessun prompt recente")
+        st.metric("📄 Risorse", resources_count)
+    
+    with col3:
+        st.metric("💬 Prompt", prompts_count)
+    
+    with col4:
+        total = tools_count + resources_count + prompts_count
+        st.metric("📊 Totale", total)
+    
+    if total > 0:
+        st.info(
+            "💡 **Nota**: Quando attivi questo server MCP, tutti questi elementi "
+            "saranno disponibili per l'agent in modalità agentica."
+        )
 
 
-def _render_selected_items():
-    """Renderizza la sezione degli elementi selezionati"""
-    st.divider()
-    st.subheader("✓ Selezione corrente")
+async def _load_preview_data(server_name: str) -> Dict[str, List[Any]]:
+    """
+    Carica i dati di preview per un server specifico.
     
-    # Risorse selezionate
-    selected_resources = st.session_state.get('mcp_selected_resources', [])
-    if selected_resources:
-        st.write(f"**Risorse allegate ({len(selected_resources)})**:")
-        for idx, resource in enumerate(selected_resources):
-            col1, col2 = st.columns([0.9, 0.1])
-            with col1:
-                st.caption(f"📄 {resource['name']}")
-            with col2:
-                if st.button("❌", key=f"remove_resource_{idx}", help="Rimuovi"):
-                    st.session_state.mcp_selected_resources.remove(resource)
-                    st.rerun()
+    Args:
+        server_name: Nome del server
+        
+    Returns:
+        Dizionario con tools, resources e prompts
+    """
+    manager = get_mcp_client_manager()
     
-    # Prompt selezionato
-    selected_prompt = st.session_state.get('mcp_selected_prompt')
-    if selected_prompt:
-        st.write("**Prompt come messaggio di sistema**:")
-        col1, col2 = st.columns([0.9, 0.1])
-        with col1:
-            st.caption(f"💬 {selected_prompt['name']} (da {selected_prompt.get('server', 'N/A')})")
-        with col2:
-            if st.button("❌", key="remove_prompt", help="Rimuovi"):
-                st.session_state.mcp_selected_prompt = None
-                st.rerun()
+    # Ottieni l'adapter
+    adapter = manager.get_adapter()
+    client = manager.get_client()
+    
+    # Crea tutti gli elementi
+    await adapter.create_all(client)
+    
+    return {
+        'tools': adapter.tools,
+        'resources': adapter.resources,
+        'prompts': adapter.prompts
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Dialog principale
 # ──────────────────────────────────────────────────────────────────────────────
 
-@st.dialog("🔍 MCP Discovery - Risorse e Prompt", width="large")
+@st.dialog("🔍 MCP Discovery - Preview Server", width="large")
 def mostra_dialog_mcp_discovery():
-    """Mostra il dialog per il discovery di risorse e prompt MCP"""
+    """Mostra il dialog per il discovery di tools, risorse e prompt MCP"""
     _init_discovery_state()
     
     # Ottieni lista server
@@ -331,82 +286,83 @@ def mostra_dialog_mcp_discovery():
         st.session_state.mcp_selected_server = selected_server
         
         st.divider()
-        _render_recent_items()
+        
+        # Pulsante per ricaricare
+        if st.button("🔄 Ricarica", use_container_width=True):
+            # Invalida cache per forzare ricaricamento
+            manager.invalidate_cache()
+            if selected_server in st.session_state.mcp_preview_data:
+                del st.session_state.mcp_preview_data[selected_server]
+            st.rerun()
     
     with col_content:
         if selected_server:
-            # Tabs per risorse e prompt
-            tab_resources, tab_prompts = st.tabs(["📄 Risorse", "💬 Prompt"])
+            # Carica dati di preview se non in cache
+            if selected_server not in st.session_state.mcp_preview_data:
+                with st.spinner(f"Caricamento preview per {selected_server}..."):
+                    try:
+                        preview_data = asyncio.run(_load_preview_data(selected_server))
+                        st.session_state.mcp_preview_data[selected_server] = preview_data
+                    except Exception as e:
+                        st.error(f"Errore nel caricamento preview: {e}")
+                        return
+            
+            # Ottieni dati dalla cache
+            preview_data = st.session_state.mcp_preview_data.get(selected_server, {})
+            tools = preview_data.get('tools', [])
+            resources = preview_data.get('resources', [])
+            prompts = preview_data.get('prompts', [])
+            
+            # Mostra riepilogo
+            _render_summary_info(len(tools), len(resources), len(prompts))
+            
+            # Tabs per tools, risorse e prompt
+            tab_tools, tab_resources, tab_prompts = st.tabs([
+                f"🔧 Tools ({len(tools)})",
+                f"📄 Risorse ({len(resources)})",
+                f"💬 Prompt ({len(prompts)})"
+            ])
+            
+            with tab_tools:
+                _render_tools_tab(tools)
             
             with tab_resources:
-                _render_resources_tab(selected_server)
+                _render_resources_tab(resources)
             
             with tab_prompts:
-                _render_prompts_tab(selected_server)
-            
-            # Mostra selezione corrente
-            _render_selected_items()
+                _render_prompts_tab(prompts)
     
-    # Pulsanti azione
+    # Pulsante chiudi
     st.divider()
-    col1, col2, col3 = st.columns([1, 1, 1])
-    
-    with col1:
-        if st.button("🔄 Aggiorna cache", use_container_width=True):
-            manager.invalidate_discovery_cache()
-            st.success("Cache invalidata", icon="✅")
-            st.rerun()
-    
-    with col2:
-        if st.button("🗑️ Pulisci selezione", use_container_width=True):
-            st.session_state.mcp_selected_resources = []
-            st.session_state.mcp_selected_prompt = None
-            st.success("Selezione pulita", icon="✅")
-            st.rerun()
-    
-    with col3:
-        if st.button("✓ Applica e chiudi", type="primary", use_container_width=True):
-            st.session_state.mcp_discovery_open = False
-            st.rerun()
+    if st.button("✓ Chiudi", type="primary", use_container_width=True):
+        st.session_state.mcp_discovery_open = False
+        st.rerun()
 
 
-def mostra_quick_access_buttons():
-    """Mostra i pulsanti di quick access per risorse e prompt recenti nella chat"""
+def mostra_quick_access_button():
+    """Mostra il pulsante di quick access per aprire il discovery"""
     _init_discovery_state()
     
     # Pulsante per aprire il dialog
-    if st.button("🔍 MCP Discovery", use_container_width=True, help="Esplora risorse e prompt MCP"):
+    if st.button("🔍 MCP Discovery", use_container_width=True, help="Esplora tools, risorse e prompt MCP"):
         st.session_state.mcp_discovery_open = True
         st.rerun()
-    
-    # Mostra elementi selezionati in modo compatto
-    selected_resources = st.session_state.get('mcp_selected_resources', [])
-    selected_prompt = st.session_state.get('mcp_selected_prompt')
-    
-    if selected_resources or selected_prompt:
-        with st.expander("✓ Selezione MCP attiva", expanded=False):
-            if selected_resources:
-                st.caption(f"📎 {len(selected_resources)} risorsa/e allegata/e")
-            if selected_prompt:
-                st.caption(f"💬 Prompt: {selected_prompt['name']}")
 
 
+# Funzioni di compatibilità (mantenute per non rompere codice esistente)
 def get_selected_mcp_resources() -> List[Dict[str, Any]]:
-    """Ottiene le risorse MCP selezionate"""
-    _init_discovery_state()
-    return st.session_state.get('mcp_selected_resources', [])
+    """Funzione di compatibilità - ritorna lista vuota"""
+    return []
 
 
 def get_selected_mcp_prompt() -> Optional[Dict[str, Any]]:
-    """Ottiene il prompt MCP selezionato"""
-    _init_discovery_state()
-    return st.session_state.get('mcp_selected_prompt')
+    """Funzione di compatibilità - ritorna None"""
+    return None
 
 
 def clear_mcp_selection():
-    """Pulisce la selezione MCP dopo l'invio del messaggio"""
-    st.session_state.mcp_selected_resources = []
-    st.session_state.mcp_selected_prompt = None
+    """Funzione di compatibilità - non fa nulla"""
+    pass
 
 
 # Made with Bob
