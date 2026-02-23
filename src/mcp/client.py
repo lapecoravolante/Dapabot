@@ -1,39 +1,4 @@
 """
-<<<<<<< HEAD
-Client MCP semplificato usando langchain-mcp-adapters
-"""
-
-from typing import Dict, Any, List, Optional
-import asyncio
-import threading
-from functools import wraps
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_core.tools import BaseTool, StructuredTool
-from src.ConfigurazioneDB import ConfigurazioneDB
-
-
-def async_to_sync_tool(async_tool: BaseTool) -> BaseTool:
-    """
-    Converte un tool async in un tool sincrono wrappando la funzione.
-    Necessario perché langchain-mcp-adapters ritorna tools async.
-    """
-    if not hasattr(async_tool, 'coroutine'):
-        # Tool già sincrono
-        return async_tool
-    
-    # Wrapper sincrono per la coroutine
-    @wraps(async_tool.coroutine)
-    def sync_wrapper(*args, **kwargs):
-        return asyncio.run(async_tool.coroutine(*args, **kwargs))
-    
-    # Crea un nuovo StructuredTool sincrono
-    return StructuredTool(
-        name=async_tool.name,
-        description=async_tool.description,
-        func=sync_wrapper,
-        args_schema=async_tool.args_schema if hasattr(async_tool, 'args_schema') else None
-    )
-=======
 Client MCP unificato usando mcp-use per tools, risorse e prompt.
 Sostituisce completamente langchain-mcp-adapters e l'SDK nativo MCP.
 """
@@ -70,34 +35,21 @@ class MCPErrorHandler(logging.Handler):
 _mcp_error_handler = MCPErrorHandler()
 _mcp_logger = logging.getLogger('mcp_use')
 _mcp_logger.addHandler(_mcp_error_handler)
->>>>>>> dev
 
 
 class MCPClientManager:
     """
-<<<<<<< HEAD
-    Gestisce i client MCP usando langchain-mcp-adapters.
-    Fornisce un'interfaccia semplificata per caricare configurazioni dal database
-    e ottenere tools per gli agenti LangChain.
-=======
     Gestisce i client MCP usando mcp-use.
     Fornisce un'interfaccia semplificata per caricare configurazioni dal database
     e ottenere tools, risorse e prompt per gli agenti LangChain.
->>>>>>> dev
     """
     
     def __init__(self):
         """Inizializza il manager"""
-<<<<<<< HEAD
-        self._client: Optional[MultiServerMCPClient] = None
-        self._server_configs: Dict[str, Dict[str, Any]] = {}
-        self._tools_cache: List[BaseTool] = []
-=======
         self._client: Optional[MCPClient] = None
         self._adapter: Optional[MCPLangChainAdapter] = None
         self._server_configs: Dict[str, Dict[str, Any]] = {}
         self._all_tools_cache: List[BaseTool] = []
->>>>>>> dev
         self._config_hash: Optional[str] = None
         # Stato del riavvio in background
         self._restart_in_progress: bool = False
@@ -106,20 +58,12 @@ class MCPClientManager:
     def carica_configurazioni_da_db(self) -> None:
         """
         Carica le configurazioni dei server MCP attivi dal database
-<<<<<<< HEAD
-        e le prepara per MultiServerMCPClient.
-=======
         e le prepara per MCPClient.
->>>>>>> dev
         NON resetta il client se le configurazioni non sono cambiate.
         """
         servers_attivi = ConfigurazioneDB.carica_mcp_servers_attivi()
         
-<<<<<<< HEAD
-        # Costruisci le nuove configurazioni
-=======
         # Costruisci le nuove configurazioni nel formato mcp-use
->>>>>>> dev
         new_server_configs = {}
         
         for server in servers_attivi:
@@ -130,40 +74,18 @@ class MCPClientManager:
             if tipo == 'local':
                 # Configurazione per server locale (stdio)
                 new_server_configs[nome] = {
-<<<<<<< HEAD
-                    'transport': 'stdio',
-=======
->>>>>>> dev
                     'command': config.get('comando', ''),
                     'args': config.get('args', []),
                     'env': config.get('env', {})
                 }
             elif tipo == 'remote':
-<<<<<<< HEAD
-                # Configurazione per server remoto (HTTP)
-                server_config = {
-                    'transport': 'http',
-=======
                 # Configurazione per server remoto (HTTP/SSE)
                 server_config = {
->>>>>>> dev
                     'url': config.get('url', '')
                 }
                 
                 # Aggiungi headers se presenti
                 headers = config.get('headers', {})
-<<<<<<< HEAD
-                if config.get('api_key'):
-                    headers['Authorization'] = f"Bearer {config['api_key']}"
-                
-                if headers:
-                    server_config['headers'] = headers
-                
-                new_server_configs[nome] = server_config
-        
-        # Confronta con le configurazioni esistenti
-        import json
-=======
                 if headers:
                     server_config['headers'] = headers
                 
@@ -180,7 +102,6 @@ class MCPClientManager:
                 new_server_configs[nome] = server_config
         
         # Confronta con le configurazioni esistenti
->>>>>>> dev
         old_config_json = json.dumps(self._server_configs, sort_keys=True)
         new_config_json = json.dumps(new_server_configs, sort_keys=True)
         
@@ -189,12 +110,6 @@ class MCPClientManager:
             self._server_configs = new_server_configs
             # Resetta il client per forzare la riconnessione con le nuove configurazioni
             self._client = None
-<<<<<<< HEAD
-            self._tools_cache = []
-            self._config_hash = None
-    
-    def get_client(self) -> MultiServerMCPClient:
-=======
             self._adapter = None
             self._all_tools_cache = []
             self._config_hash = None
@@ -202,17 +117,12 @@ class MCPClientManager:
             # quando effettivamente ricarica i tools
     
     def get_client(self) -> MCPClient:
->>>>>>> dev
         """
         Ottiene o crea il client MCP con le configurazioni caricate.
         Se un riavvio è in corso, aspetta che finisca prima di restituire il client.
         
         Returns:
-<<<<<<< HEAD
-            Istanza di MultiServerMCPClient
-=======
             Istanza di MCPClient
->>>>>>> dev
         """
         # Se un riavvio è in corso, aspetta che finisca
         if self._restart_in_progress and self._restart_thread:
@@ -222,24 +132,6 @@ class MCPClientManager:
             self.carica_configurazioni_da_db()
         
         if self._client is None:
-<<<<<<< HEAD
-            self._client = MultiServerMCPClient(self._server_configs)
-        
-        return self._client
-    
-    async def get_tools(self) -> List[BaseTool]:
-        """
-        Ottiene tutti i tools dai server MCP configurati.
-        Converte i tools async in sincroni per compatibilità con LangChain.
-        Usa caching per evitare di ricreare i tools ad ogni chiamata.
-        
-        Returns:
-            Lista di tools LangChain sincroni pronti per l'uso con gli agenti
-        """
-        # Calcola hash della configurazione per invalidare cache se cambia
-        import hashlib
-        import json
-=======
             # Crea configurazione nel formato mcp-use
             config = {"mcpServers": self._server_configs}
             self._client = MCPClient(config=config)
@@ -269,58 +161,10 @@ class MCPClientManager:
             - errors: Lista di messaggi di errore (vuota se nessun errore)
         """
         # Calcola hash della configurazione per invalidare cache se cambia
->>>>>>> dev
         config_str = json.dumps(self._server_configs, sort_keys=True)
         current_hash = hashlib.md5(config_str.encode()).hexdigest()
         
         # Se la configurazione non è cambiata e abbiamo una cache, usala
-<<<<<<< HEAD
-        if self._config_hash == current_hash and self._tools_cache:
-            return self._tools_cache
-        
-        # Altrimenti ricarica i tools
-        client = self.get_client()
-        async_tools = await client.get_tools()
-        
-        # Converti tutti i tools async in sincroni
-        sync_tools = [async_to_sync_tool(tool) for tool in async_tools]
-        
-        # Aggiorna cache
-        self._tools_cache = sync_tools
-        self._config_hash = current_hash
-        
-        return sync_tools
-    
-    async def get_resources(self, server_name: str, uris: Optional[List[str]] = None) -> List[Any]:
-        """
-        Ottiene le risorse da un server MCP specifico.
-        
-        Args:
-            server_name: Nome del server MCP
-            uris: Lista opzionale di URI specifici da caricare
-            
-        Returns:
-            Lista di Blob objects con le risorse
-        """
-        client = self.get_client()
-        return await client.get_resources(server_name, uris=uris)
-    
-    async def get_prompt(self, server_name: str, prompt_name: str, 
-                        arguments: Optional[Dict[str, Any]] = None) -> List[Any]:
-        """
-        Ottiene un prompt da un server MCP specifico.
-        
-        Args:
-            server_name: Nome del server MCP
-            prompt_name: Nome del prompt
-            arguments: Argomenti opzionali per il prompt
-            
-        Returns:
-            Lista di messaggi LangChain
-        """
-        client = self.get_client()
-        return await client.get_prompt(server_name, prompt_name, arguments=arguments)
-=======
         if self._config_hash == current_hash and self._all_tools_cache:
             # Ritorna cache con errori vuoti (già gestiti al caricamento precedente)
             return self._all_tools_cache, []
@@ -414,7 +258,6 @@ class MCPClientManager:
                 'prompts': adapter.get_prompts_count()
             }
         }
->>>>>>> dev
     
     def _do_restart(self) -> None:
         """
@@ -424,12 +267,8 @@ class MCPClientManager:
         try:
             # Resetta il client
             self._client = None
-<<<<<<< HEAD
-            self._tools_cache = []
-=======
             self._adapter = None
             self._all_tools_cache = []
->>>>>>> dev
             self._config_hash = None
         finally:
             # Marca il riavvio come completato
@@ -519,8 +358,6 @@ class MCPClientManager:
         
         # Forza il ricaricamento delle configurazioni
         self.carica_configurazioni_da_db()
-<<<<<<< HEAD
-=======
     
     def invalidate_cache(self) -> None:
         """
@@ -529,7 +366,6 @@ class MCPClientManager:
         """
         self._all_tools_cache = []
         self._config_hash = None
->>>>>>> dev
 
 
 # Istanza singleton globale

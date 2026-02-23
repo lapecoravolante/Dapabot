@@ -12,15 +12,12 @@ from src.tools.loader import Loader as tools_loader
 from src.tools.gui_tools import mostra_dialog_tools_agent, _on_close_tools_dialog
 from src.mcp.gui_mcp import mostra_dialog_mcp
 from src.mcp.client import get_mcp_client_manager
-<<<<<<< HEAD
-=======
 from src.mcp.gui_mcp_discovery import (
     mostra_dialog_mcp_discovery,
     get_selected_mcp_resources,
     get_selected_mcp_prompt,
     clear_mcp_selection
 )
->>>>>>> dev
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Bootstrap iniziale
@@ -277,21 +274,11 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
                     risultato['errors'].append(error_msg)
                     st.toast(f"⚠️ {error_msg}", icon="⚠️")
     
-<<<<<<< HEAD
-    # Carica i tools MCP se il toggle è attivo
-=======
     # Carica tools, risorse e prompt MCP se il toggle è attivo
->>>>>>> dev
     if st.session_state.get("mcp_enabled", False):
         try:
             manager = get_mcp_client_manager()
             manager.carica_configurazioni_da_db()
-<<<<<<< HEAD
-            mcp_tools = asyncio.run(manager.get_tools())
-            tools_to_use.extend(mcp_tools)
-        except Exception as e:
-            error_msg = f"Errore caricamento tools MCP: {str(e)}"
-=======
             # Usa il nuovo metodo unificato che ritorna (tools, errors)
             mcp_all_tools, mcp_errors = asyncio.run(manager.get_all_as_langchain_tools())
             
@@ -307,7 +294,6 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
                 tools_to_use.extend(mcp_all_tools)
         except Exception as e:
             error_msg = f"Errore caricamento MCP (tools/risorse/prompt): {str(e)}"
->>>>>>> dev
             risultato['errors'].append(error_msg)
             st.toast(f"⚠️ {error_msg}", icon="⚠️")
     
@@ -485,140 +471,6 @@ def crea_sidebar(providers: dict[str, Provider]):
             value=st.session_state[provider_scelto][sysmsg_key],
             on_change=sincronizza_sessione, args=(sysmsg_key,)
         )
-<<<<<<< HEAD
-        
-        # CHAT RECENTI            
-        with st.container(border=True):            
-            def on_ripristina_chat():
-                val = st.session_state["ripristina_chat"]
-                if val:
-                    prov, mod = val.split(" | ")
-                    # Aggiorna la chiave per la TabBar, forzando la ricreazione del widget e l'aggiornamento del provider corretto
-                    if st.session_state.get(f"{st.session_state['tabbar_key']}"):
-                        del st.session_state[f"{st.session_state['tabbar_key']}"]
-                    st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"
-                    # Aggiorna la selezione del modello per quel provider
-                    st.session_state[f"modello_{prov}"] = mod
-                    # Carica i messaggi dal database SOLO se "Autocaricamento dal DB" è abilitato
-                    if prov in providers and st.session_state.get("autoload_chat_db", False):
-                        providers[prov].carica_chat_da_db(modello=mod)
-            
-            chat_recenti = ["",]
-            for nome_prov, prov in providers.items():
-                modelli = prov.get_lista_modelli_con_chat()
-                chat_recenti.extend([f"{nome_prov} | {modello}" for modello in modelli])
-            if "chat_db_key" in st.session_state and st.session_state["chat_db_key"]:
-                chat_su_disco=set([f"{prov} | {mod}" for prov, mod in ConfigurazioneDB.ritorna_chat_recenti()])
-                chat_recenti=sorted(list(chat_su_disco.union(set(chat_recenti))))
-            if len(chat_recenti)>1:
-                st.selectbox("📂 Riapri chat recente:", options=chat_recenti, key="ripristina_chat", on_change=on_ripristina_chat)
-            else:
-                st.caption("📂 Nessuna chat recente")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.checkbox("Elenca chat su DB", key="chat_db_key", help="Se abilitato elenca le chat memorizzate su disco nella lista qui sopra", label_visibility="visible")
-            with col2:
-                if st.checkbox("Autocaricamento dal DB", key="autoload_chat_db", help="Se abilitato carica automaticamente la cronologia delle chat dal disco (se presenti)", label_visibility="visible"):
-                    provider.carica_chat_da_db()
-            
-        # Sezione Modalità Agentica
-        with st.expander("🤖 Modalità Agentica", expanded=bool(st.session_state[provider_scelto][agentic_key])):
-            # Callback per il toggle della modalità agentica
-            def on_toggle_agentic():
-                # Sincronizza il valore del toggle
-                sincronizza_sessione(agentic_key)
-                
-                # Se disabilito modalità agentica, disabilito anche MCP
-                if not st.session_state[agentic_key]:
-                    st.session_state["mcp_enabled"] = False
-                
-                # Ricarica i tools attivi solo nel provider corrente
-                risultato = _carica_tools_nei_provider(provider_name=provider_scelto)
-                
-                # Salva gli errori in session_state per mostrarli all'utente
-                if risultato['errors']:
-                    st.session_state["tools_loading_errors"] = risultato['errors']
-                else:
-                    # Rimuovi eventuali errori precedenti
-                    if "tools_loading_errors" in st.session_state:
-                        del st.session_state["tools_loading_errors"]
-            
-            # Toggle Modalità agentica
-            modalita_agentica = st.toggle("Abilita Modalità Agentica", value=st.session_state[provider_scelto][agentic_key],
-                       key=agentic_key, on_change=on_toggle_agentic)
-            
-            # Toggle MCP (accanto al toggle modalità agentica)
-            def on_toggle_mcp():
-                # Se abilito MCP, abilito automaticamente anche modalità agentica
-                if st.session_state.get("mcp_enabled", False):
-                    if not st.session_state[provider_scelto][agentic_key]:
-                        st.session_state[agentic_key] = True
-                        st.session_state[provider_scelto][agentic_key] = True
-                
-                # Ricarica i tools quando MCP viene attivato/disattivato
-                risultato = _carica_tools_nei_provider(provider_name=provider_scelto)
-                if risultato['errors']:
-                    st.session_state["tools_loading_errors"] = risultato['errors']
-                else:
-                    if "tools_loading_errors" in st.session_state:
-                        del st.session_state["tools_loading_errors"]
-            
-            # MCP richiede modalità agentica, quindi disabilita il toggle se agentica è off
-            mcp_disabled = not modalita_agentica
-            mcp_enabled = st.toggle("Abilita MCP",
-                       value=st.session_state.get("mcp_enabled", False) and modalita_agentica,
-                       key="mcp_enabled",
-                       on_change=on_toggle_mcp,
-                       disabled=mcp_disabled,
-                       help="Abilita i tools dai server MCP attivi (richiede modalità agentica)")
-            
-            # Pulsanti per configurare tools e MCP
-            col_tools, col_mcp = st.columns(2)
-            
-            with col_tools:
-                if st.button("⚙️ Configura Tools", key="btn_config_tools", use_container_width=True):
-                    st.session_state["tools_dialog_open"] = True
-                    st.session_state["provider_corrente_dialog"] = provider_scelto
-            
-            with col_mcp:
-                if st.button("🔌 Configura MCP", key="btn_config_mcp", use_container_width=True):
-                    st.session_state["mcp_dialog_open"] = True
-            
-            # Mostra info sui tools attivi
-            tools_attivi = ConfigurazioneDB.carica_tools_attivi()
-            if tools_attivi:
-                with st.expander("📋 Dettagli tools attivi", expanded=False):
-                    for tool in tools_attivi:
-                        st.write(f"• **{tool['nome_tool']}**")
-            else:
-                st.info("ℹ️ Nessun tool attivo. Configura e attiva i tools dalla finestra di configurazione.")
-            
-            # Mostra info sui server MCP attivi
-            if st.session_state.get("mcp_enabled", False):
-                servers_mcp_attivi = ConfigurazioneDB.carica_mcp_servers_attivi()
-                if servers_mcp_attivi:
-                    with st.expander("🔌 Server MCP attivi", expanded=False):
-                        for server in servers_mcp_attivi:
-                            tipo_icon = "💻" if server['tipo'] == 'local' else "🌐"
-                            st.write(f"{tipo_icon} **{server['nome']}** ({server['tipo']})")
-                else:
-                    st.info("ℹ️ Nessun server MCP attivo. Configura e attiva i server dalla finestra MCP.")
-            
-            # Mostra eventuali errori di caricamento dei tools
-            if "tools_loading_errors" in st.session_state:
-                with st.expander("⚠️ Errori di caricamento tools", expanded=True):
-                    for error in st.session_state["tools_loading_errors"]:
-                        st.error(error, icon="❌")
-            
-        # Sezione RAG
-        with st.expander("🔎 RAG", expanded=bool(st.session_state[provider_scelto][rag_enabled_key])):
-            # Toggle RAG
-            rag_abilitato = st.toggle("Abilita RAG", key=rag_enabled_key,
-                value=st.session_state[provider_scelto][rag_enabled_key],
-                on_change=sincronizza_sessione, args=(rag_enabled_key,)
-            )
-=======
->>>>>>> dev
 
         # ──────────────────────────────────────────────────────────────────────────────
         # Sezione Chat
@@ -920,13 +772,10 @@ def crea_sidebar(providers: dict[str, Provider]):
     # ---- Render della finestra modale configurazione MCP ----
     if st.session_state.get("mcp_dialog_open", False):
         mostra_dialog_mcp()
-<<<<<<< HEAD
-=======
     
     # ---- Render della finestra modale MCP Discovery ----
     if st.session_state.get("mcp_discovery_open", False):
         mostra_dialog_mcp_discovery()
->>>>>>> dev
 
     return provider_scelto, messaggio_di_sistema
 

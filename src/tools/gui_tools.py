@@ -27,17 +27,6 @@ def _on_close_tools_dialog():
         from src.gui_utils import _carica_tools_nei_provider
         risultato = _carica_tools_nei_provider(provider_name=provider_corrente)
         
-<<<<<<< HEAD
-        # Salva gli errori in session_state per mostrarli all'utente
-        if risultato['errors']:
-            st.session_state["tools_loading_errors"] = risultato['errors']
-        else:
-            # Rimuovi eventuali errori precedenti
-            if "tools_loading_errors" in st.session_state:
-                del st.session_state["tools_loading_errors"]
-        
-=======
->>>>>>> dev
         # Pulisci lo stato temporaneo
         del st.session_state["tools_selezionati_temp"]
         if "provider_corrente_dialog" in st.session_state:

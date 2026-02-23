@@ -1,13 +1,5 @@
 """
 Modulo per il supporto ai server MCP (Model Context Protocol)
-<<<<<<< HEAD
-Utilizza langchain-mcp-adapters per l'integrazione con LangChain
-"""
-
-from .client import MCPClientManager, get_mcp_client_manager
-
-__all__ = ['MCPClientManager', 'get_mcp_client_manager']
-=======
 Utilizza mcp-use per l'integrazione unificata di tools, risorse e prompt
 """
 
@@ -29,6 +21,5 @@ __all__ = [
     'get_selected_mcp_prompt',
     'clear_mcp_selection'
 ]
->>>>>>> dev
 
 # Made with Bob
