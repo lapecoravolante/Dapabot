@@ -9,10 +9,9 @@ from src.providers.base import Provider
 if "sqlite_web_process" not in st.session_state:
     try:
         # Avvia sqlite-web in background
+        # Flag -q: logga solo errori, non info di debug
         process = subprocess.Popen(
-            ["sqlite_web", "config.db", "--host", "127.0.0.1", "--port", "8080"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            ["sqlite_web", "config.db", "-q", "--host", "127.0.0.1", "--port", "6969"]
         )
         st.session_state.sqlite_web_process = process
         

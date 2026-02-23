@@ -14,3 +14,7 @@ config.db
 .venv
 .vscode/
 test_mcp_server.py
+<<<<<<< HEAD
+=======
+test_mcp_discovery.py
+>>>>>>> dev

@@ -66,6 +66,18 @@ def _on_close_mcp_dialog():
         del st.session_state["selected_mcp_server"]
     if "mcp_server_config_temp" in st.session_state:
         del st.session_state["mcp_server_config_temp"]
+<<<<<<< HEAD
+=======
+    
+    # Ricarica i tools per aggiornare eventuali errori MCP
+    # Solo se MCP è abilitato e c'è un provider attivo
+    if st.session_state.get("mcp_enabled", False) and "provider_scelto" in st.session_state:
+        # Import lazy per evitare circular import
+        from src.gui_utils import _carica_tools_nei_provider
+        
+        provider_scelto = st.session_state["provider_scelto"]
+        risultato = _carica_tools_nei_provider(provider_name=provider_scelto)
+>>>>>>> dev
 
 
 @st.dialog(
@@ -113,6 +125,7 @@ def mostra_dialog_mcp():
                     server = servers_dict[server_name]
                     tipo_label = server['tipo']
                     
+<<<<<<< HEAD
                     # Pulsante che seleziona il server quando cliccato
                     if st.button(
                         f"{server_name} ({tipo_label})",
@@ -134,6 +147,108 @@ def mostra_dialog_mcp():
     
     # Multiselect per selezionare server attivi (dopo le colonne)
     st.divider()
+=======
+                    # Layout con 3 colonne: nome server, preview, elimina
+                    col_btn, col_preview, col_delete = st.columns([0.65, 0.20, 0.15])
+                    
+                    with col_btn:
+                        # Pulsante che seleziona il server quando cliccato
+                        if st.button(
+                            f"{server_name} ({tipo_label})",
+                            key=f"select_mcp_{server_name}",
+                            use_container_width=True
+                        ):
+                            st.session_state["selected_mcp_server"] = server_name
+                            # Carica la configurazione esistente
+                            st.session_state["mcp_server_config_temp"] = {
+                                'nome': server['nome'],
+                                'tipo': server['tipo'],
+                                'descrizione': server.get('descrizione', ''),
+                                'configurazione': server.get('configurazione', {}),
+                                'attivo': server.get('attivo', False)
+                            }
+                            st.rerun()
+                    
+                    with col_preview:
+                        # Pulsante preview per tutti i server
+                        if st.button(
+                            "🔍",
+                            key=f"preview_mcp_{server_name}",
+                            help="Preview tools/risorse/prompt",
+                            use_container_width=True
+                        ):
+                            # Chiudi prima la dialog MCP corrente
+                            st.session_state["mcp_dialog_open"] = False
+                            # Poi apri la dialog discovery
+                            st.session_state.mcp_selected_server = server_name
+                            st.session_state.mcp_discovery_open = True
+                            st.rerun()
+                    
+                    with col_delete:
+                        # Pulsante elimina inline
+                        if st.button(
+                            "❌",
+                            key=f"delete_mcp_{server_name}",
+                            help="Elimina server",
+                            use_container_width=True
+                        ):
+                            try:
+                                manager = get_mcp_client_manager()
+                                manager.cancella_mcp_server(server_name)
+                                
+                                # Feedback con toast
+                                st.toast(f"🗑️ Server '{server_name}' eliminato!", icon="🗑️")
+                                
+                                # Reset della selezione se era il server selezionato
+                                if st.session_state.get("selected_mcp_server") == server_name:
+                                    st.session_state["selected_mcp_server"] = None
+                                    st.session_state["mcp_server_config_temp"] = {}
+                                
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Errore eliminazione: {e}")
+            else:
+                st.info("Nessun server trovato")
+        
+        # Pulsante "Aggiungi Nuovo Server" sotto il container
+        if st.button("➕ Aggiungi Nuovo Server", use_container_width=True, key="add_new_mcp_server"):
+            # Genera un nome univoco per il nuovo server
+            base_name = "nuovo_server"
+            counter = 1
+            nuovo_nome = base_name
+            while nuovo_nome in servers_dict:
+                nuovo_nome = f"{base_name}_{counter}"
+                counter += 1
+            
+            # Crea un nuovo server con configurazione di default (inattivo)
+            manager = get_mcp_client_manager()
+            manager.salva_mcp_server(
+                nome=nuovo_nome,
+                tipo="local",
+                descrizione="",
+                configurazione={'comando': '', 'args': [], 'env': {}},
+                attivo=False
+            )
+            
+            # Seleziona automaticamente il nuovo server e carica la sua configurazione
+            st.session_state["selected_mcp_server"] = nuovo_nome
+            st.session_state["mcp_server_config_temp"] = {
+                'nome': nuovo_nome,
+                'tipo': 'local',
+                'descrizione': '',
+                'configurazione': {'comando': '', 'args': [], 'env': {}},
+                'attivo': False
+            }
+            
+            # Feedback con toast
+            st.toast(f"✅ Server '{nuovo_nome}' creato! Configuralo e attivalo nel multiselect.", icon="✅")
+            
+            st.rerun()
+    
+    st.divider()
+    
+    # Multiselect per selezionare server attivi
+>>>>>>> dev
     st.subheader("🔧 Selezione Server Attivi")
     
     # Ottieni tutti i server disponibili
@@ -171,32 +286,55 @@ def mostra_dialog_mcp():
             config_temp = st.session_state["mcp_server_config_temp"]
             st.markdown(f"**Server selezionato:** `{selected_server}`")
             
+<<<<<<< HEAD
             # Nome (editabile)
+=======
+            # Nome (editabile) - key dinamica per forzare aggiornamento
+>>>>>>> dev
             nome = st.text_input(
                 "Nome",
                 value=config_temp.get('nome', ''),
                 help="Nome identificativo del server",
+<<<<<<< HEAD
                 key="mcp_nome"
+=======
+                key=f"mcp_nome_{selected_server}"
+>>>>>>> dev
             )
             
             # Aggiorna il nome nella config temporanea
             config_temp['nome'] = nome
             
+<<<<<<< HEAD
             # Tipo
+=======
+            # Tipo - key dinamica
+>>>>>>> dev
             tipo = st.selectbox(
                 "Tipo",
                 options=["local", "remote"],
                 index=0 if config_temp.get('tipo') == 'local' else 1,
                 help="Tipo di server MCP",
+<<<<<<< HEAD
                 key="mcp_tipo"
             )
             
             # Descrizione
+=======
+                key=f"mcp_tipo_{selected_server}"
+            )
+            
+            # Descrizione - key dinamica
+>>>>>>> dev
             descrizione = st.text_area(
                 "Descrizione",
                 value=config_temp.get('descrizione', ''),
                 help="Descrizione opzionale del server",
+<<<<<<< HEAD
                 key="mcp_descrizione"
+=======
+                key=f"mcp_descrizione_{selected_server}"
+>>>>>>> dev
             )
             
             # Configurazione specifica per tipo
@@ -208,19 +346,31 @@ def mostra_dialog_mcp():
                     "Comando",
                     value=configurazione_esistente.get('comando', ''),
                     help="Comando per avviare il server (es. 'python', 'node', 'npx')",
+<<<<<<< HEAD
                     key="mcp_comando"
+=======
+                    key=f"mcp_comando_{selected_server}"
+>>>>>>> dev
                 )
                 args_str = st.text_input(
                     "Argomenti",
                     value=' '.join(configurazione_esistente.get('args', [])),
                     help="Argomenti separati da spazio",
+<<<<<<< HEAD
                     key="mcp_args"
+=======
+                    key=f"mcp_args_{selected_server}"
+>>>>>>> dev
                 )
                 env_str = st.text_area(
                     "Variabili d'ambiente",
                     value='\n'.join([f"{k}={v}" for k, v in configurazione_esistente.get('env', {}).items()]),
                     help="Una per riga nel formato CHIAVE=valore",
+<<<<<<< HEAD
                     key="mcp_env"
+=======
+                    key=f"mcp_env_{selected_server}"
+>>>>>>> dev
                 )
                 
                 configurazione = {
@@ -234,20 +384,32 @@ def mostra_dialog_mcp():
                     "URL",
                     value=configurazione_esistente.get('url', ''),
                     help="URL del server MCP",
+<<<<<<< HEAD
                     key="mcp_url"
+=======
+                    key=f"mcp_url_{selected_server}"
+>>>>>>> dev
                 )
                 api_key = st.text_input(
                     "API Key",
                     value=configurazione_esistente.get('api_key', ''),
                     type="password",
                     help="API key per l'autenticazione (opzionale)",
+<<<<<<< HEAD
                     key="mcp_api_key"
+=======
+                    key=f"mcp_api_key_{selected_server}"
+>>>>>>> dev
                 )
                 headers_str = st.text_area(
                     "Headers HTTP",
                     value='\n'.join([f"{k}: {v}" for k, v in configurazione_esistente.get('headers', {}).items()]),
                     help="Uno per riga nel formato Chiave: valore",
+<<<<<<< HEAD
                     key="mcp_headers"
+=======
+                    key=f"mcp_headers_{selected_server}"
+>>>>>>> dev
                 )
                 
                 configurazione = {
@@ -261,6 +423,7 @@ def mostra_dialog_mcp():
             config_temp['descrizione'] = descrizione
             config_temp['configurazione'] = configurazione
             st.session_state["mcp_server_config_temp"] = config_temp
+<<<<<<< HEAD
     
     st.divider()
     
@@ -318,6 +481,13 @@ def mostra_dialog_mcp():
         if st.button("💾 Salva", type="primary", use_container_width=True, disabled=not selected_server):
             if selected_server:
                 config_temp = st.session_state["mcp_server_config_temp"]
+=======
+            
+            # ==================== PULSANTE SALVA ====================
+            # Posizionato in fondo al form di configurazione
+            st.divider()
+            if st.button("💾 Salva", type="primary", use_container_width=True, key="save_mcp_config"):
+>>>>>>> dev
                 nome_nuovo = config_temp.get('nome', '').strip()
                 tipo = config_temp.get('tipo')
                 configurazione = config_temp.get('configurazione', {})
@@ -368,8 +538,11 @@ def mostra_dialog_mcp():
                     
                     st.rerun()
     
+<<<<<<< HEAD
     st.divider()
     
+=======
+>>>>>>> dev
     # ==================== PULSANTE CHIUDI ====================
     if st.button("✅ Chiudi", use_container_width=True):
         _on_close_mcp_dialog()

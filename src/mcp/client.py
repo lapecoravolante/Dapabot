@@ -1,4 +1,5 @@
 """
+<<<<<<< HEAD
 Client MCP semplificato usando langchain-mcp-adapters
 """
 
@@ -32,20 +33,71 @@ def async_to_sync_tool(async_tool: BaseTool) -> BaseTool:
         func=sync_wrapper,
         args_schema=async_tool.args_schema if hasattr(async_tool, 'args_schema') else None
     )
+=======
+Client MCP unificato usando mcp-use per tools, risorse e prompt.
+Sostituisce completamente langchain-mcp-adapters e l'SDK nativo MCP.
+"""
+
+from typing import Dict, Any, List, Optional, Tuple
+import asyncio
+import threading
+import hashlib
+import json
+import logging
+from mcp_use import MCPClient
+from langchain_core.tools import BaseTool
+from src.ConfigurazioneDB import ConfigurazioneDB
+from src.mcp.langchain_adapter import MCPLangChainAdapter
+
+# Configura un handler per catturare i log di mcp-use
+class MCPErrorHandler(logging.Handler):
+    """Handler personalizzato per catturare errori da mcp-use"""
+    def __init__(self):
+        super().__init__()
+        self.errors = []
+    
+    def emit(self, record):
+        if record.levelno >= logging.ERROR:
+            self.errors.append(record.getMessage())
+    
+    def clear(self):
+        self.errors = []
+    
+    def get_errors(self):
+        return self.errors.copy()
+
+# Crea un'istanza globale del handler
+_mcp_error_handler = MCPErrorHandler()
+_mcp_logger = logging.getLogger('mcp_use')
+_mcp_logger.addHandler(_mcp_error_handler)
+>>>>>>> dev
 
 
 class MCPClientManager:
     """
+<<<<<<< HEAD
     Gestisce i client MCP usando langchain-mcp-adapters.
     Fornisce un'interfaccia semplificata per caricare configurazioni dal database
     e ottenere tools per gli agenti LangChain.
+=======
+    Gestisce i client MCP usando mcp-use.
+    Fornisce un'interfaccia semplificata per caricare configurazioni dal database
+    e ottenere tools, risorse e prompt per gli agenti LangChain.
+>>>>>>> dev
     """
     
     def __init__(self):
         """Inizializza il manager"""
+<<<<<<< HEAD
         self._client: Optional[MultiServerMCPClient] = None
         self._server_configs: Dict[str, Dict[str, Any]] = {}
         self._tools_cache: List[BaseTool] = []
+=======
+        self._client: Optional[MCPClient] = None
+        self._adapter: Optional[MCPLangChainAdapter] = None
+        self._server_configs: Dict[str, Dict[str, Any]] = {}
+        self._all_tools_cache: List[BaseTool] = []
+>>>>>>> dev
         self._config_hash: Optional[str] = None
         # Stato del riavvio in background
         self._restart_in_progress: bool = False
@@ -54,12 +106,20 @@ class MCPClientManager:
     def carica_configurazioni_da_db(self) -> None:
         """
         Carica le configurazioni dei server MCP attivi dal database
+<<<<<<< HEAD
         e le prepara per MultiServerMCPClient.
+=======
+        e le prepara per MCPClient.
+>>>>>>> dev
         NON resetta il client se le configurazioni non sono cambiate.
         """
         servers_attivi = ConfigurazioneDB.carica_mcp_servers_attivi()
         
+<<<<<<< HEAD
         # Costruisci le nuove configurazioni
+=======
+        # Costruisci le nuove configurazioni nel formato mcp-use
+>>>>>>> dev
         new_server_configs = {}
         
         for server in servers_attivi:
@@ -70,20 +130,29 @@ class MCPClientManager:
             if tipo == 'local':
                 # Configurazione per server locale (stdio)
                 new_server_configs[nome] = {
+<<<<<<< HEAD
                     'transport': 'stdio',
+=======
+>>>>>>> dev
                     'command': config.get('comando', ''),
                     'args': config.get('args', []),
                     'env': config.get('env', {})
                 }
             elif tipo == 'remote':
+<<<<<<< HEAD
                 # Configurazione per server remoto (HTTP)
                 server_config = {
                     'transport': 'http',
+=======
+                # Configurazione per server remoto (HTTP/SSE)
+                server_config = {
+>>>>>>> dev
                     'url': config.get('url', '')
                 }
                 
                 # Aggiungi headers se presenti
                 headers = config.get('headers', {})
+<<<<<<< HEAD
                 if config.get('api_key'):
                     headers['Authorization'] = f"Bearer {config['api_key']}"
                 
@@ -94,6 +163,24 @@ class MCPClientManager:
         
         # Confronta con le configurazioni esistenti
         import json
+=======
+                if headers:
+                    server_config['headers'] = headers
+                
+                # Gestione autenticazione
+                if config.get('api_key'):
+                    # Bearer token authentication
+                    server_config['auth'] = config['api_key']
+                elif config.get('oauth_config'):
+                    # OAuth configuration
+                    server_config['auth'] = config['oauth_config']
+                # Se non c'è né api_key né oauth_config, NON aggiungere 'auth'
+                # mcp-use tratterà il server come pubblico (no auth)
+                
+                new_server_configs[nome] = server_config
+        
+        # Confronta con le configurazioni esistenti
+>>>>>>> dev
         old_config_json = json.dumps(self._server_configs, sort_keys=True)
         new_config_json = json.dumps(new_server_configs, sort_keys=True)
         
@@ -102,16 +189,30 @@ class MCPClientManager:
             self._server_configs = new_server_configs
             # Resetta il client per forzare la riconnessione con le nuove configurazioni
             self._client = None
+<<<<<<< HEAD
             self._tools_cache = []
             self._config_hash = None
     
     def get_client(self) -> MultiServerMCPClient:
+=======
+            self._adapter = None
+            self._all_tools_cache = []
+            self._config_hash = None
+            # NON pulire gli errori qui! Verranno puliti in get_all_as_langchain_tools()
+            # quando effettivamente ricarica i tools
+    
+    def get_client(self) -> MCPClient:
+>>>>>>> dev
         """
         Ottiene o crea il client MCP con le configurazioni caricate.
         Se un riavvio è in corso, aspetta che finisca prima di restituire il client.
         
         Returns:
+<<<<<<< HEAD
             Istanza di MultiServerMCPClient
+=======
+            Istanza di MCPClient
+>>>>>>> dev
         """
         # Se un riavvio è in corso, aspetta che finisca
         if self._restart_in_progress and self._restart_thread:
@@ -121,6 +222,7 @@ class MCPClientManager:
             self.carica_configurazioni_da_db()
         
         if self._client is None:
+<<<<<<< HEAD
             self._client = MultiServerMCPClient(self._server_configs)
         
         return self._client
@@ -137,10 +239,42 @@ class MCPClientManager:
         # Calcola hash della configurazione per invalidare cache se cambia
         import hashlib
         import json
+=======
+            # Crea configurazione nel formato mcp-use
+            config = {"mcpServers": self._server_configs}
+            self._client = MCPClient(config=config)
+        
+        return self._client
+    
+    def get_adapter(self) -> MCPLangChainAdapter:
+        """
+        Ottiene o crea l'adapter LangChain.
+        
+        Returns:
+            Istanza di MCPLangChainAdapter
+        """
+        if self._adapter is None:
+            self._adapter = MCPLangChainAdapter()
+        return self._adapter
+    
+    async def get_all_as_langchain_tools(self) -> Tuple[List[BaseTool], List[str]]:
+        """
+        Ottiene tutti i tools, risorse e prompt dai server MCP configurati
+        come lista unificata di tools LangChain.
+        Usa caching per evitare di ricreare i tools ad ogni chiamata.
+        
+        Returns:
+            Tupla (tools, errors) dove:
+            - tools: Lista di tools LangChain sincroni (tools + risorse + prompt)
+            - errors: Lista di messaggi di errore (vuota se nessun errore)
+        """
+        # Calcola hash della configurazione per invalidare cache se cambia
+>>>>>>> dev
         config_str = json.dumps(self._server_configs, sort_keys=True)
         current_hash = hashlib.md5(config_str.encode()).hexdigest()
         
         # Se la configurazione non è cambiata e abbiamo una cache, usala
+<<<<<<< HEAD
         if self._config_hash == current_hash and self._tools_cache:
             return self._tools_cache
         
@@ -186,6 +320,101 @@ class MCPClientManager:
         """
         client = self.get_client()
         return await client.get_prompt(server_name, prompt_name, arguments=arguments)
+=======
+        if self._config_hash == current_hash and self._all_tools_cache:
+            # Ritorna cache con errori vuoti (già gestiti al caricamento precedente)
+            return self._all_tools_cache, []
+        
+        # Altrimenti ricarica tutto
+        # Pulisci gli errori precedenti
+        _mcp_error_handler.clear()
+        
+        client = self.get_client()
+        adapter = self.get_adapter()
+        
+        # Crea tutti i tools, risorse e prompt
+        await adapter.create_all(client)
+        
+        # Ottieni la lista unificata
+        all_tools = adapter.all_tools
+        
+        # Ottieni gli errori catturati durante il caricamento
+        errors = _mcp_error_handler.get_errors()
+        
+        # Aggiorna cache
+        self._all_tools_cache = all_tools
+        self._config_hash = current_hash
+        
+        # Ritorna tools ed errori separatamente
+        return all_tools, errors
+    
+    async def get_tools_only(self) -> List[BaseTool]:
+        """
+        Ottiene solo i tools (esclude risorse e prompt).
+        
+        Returns:
+            Lista di tools LangChain
+        """
+        client = self.get_client()
+        adapter = self.get_adapter()
+        await adapter.create_tools(client)
+        return adapter.tools
+    
+    async def get_resources_only(self) -> List[BaseTool]:
+        """
+        Ottiene solo le risorse (come tools LangChain).
+        
+        Returns:
+            Lista di risorse convertite in tools LangChain
+        """
+        client = self.get_client()
+        adapter = self.get_adapter()
+        await adapter.create_resources(client)
+        return adapter.resources
+    
+    async def get_prompts_only(self) -> List[BaseTool]:
+        """
+        Ottiene solo i prompt (come tools LangChain).
+        
+        Returns:
+            Lista di prompt convertiti in tools LangChain
+        """
+        client = self.get_client()
+        adapter = self.get_adapter()
+        await adapter.create_prompts(client)
+        return adapter.prompts
+    
+    async def get_preview_info(self) -> Dict[str, Dict[str, int]]:
+        """
+        Ottiene informazioni di preview su tools, risorse e prompt
+        per ogni server configurato.
+        
+        Returns:
+            Dizionario con conteggi per server:
+            {
+                'server_name': {
+                    'tools': 5,
+                    'resources': 3,
+                    'prompts': 2
+                }
+            }
+        """
+        client = self.get_client()
+        adapter = self.get_adapter()
+        
+        # Crea tutto per ottenere i conteggi
+        await adapter.create_all(client)
+        
+        # Per ora ritorniamo conteggi globali
+        # TODO: mcp-use potrebbe non fornire info per-server facilmente
+        return {
+            'total': {
+                'tools': adapter.get_tools_count(),
+                'resources': adapter.get_resources_count(),
+                'prompts': adapter.get_prompts_count()
+            }
+        }
+>>>>>>> dev
     
     def _do_restart(self) -> None:
         """
@@ -195,7 +424,12 @@ class MCPClientManager:
         try:
             # Resetta il client
             self._client = None
+<<<<<<< HEAD
             self._tools_cache = []
+=======
+            self._adapter = None
+            self._all_tools_cache = []
+>>>>>>> dev
             self._config_hash = None
         finally:
             # Marca il riavvio come completato
@@ -285,6 +519,17 @@ class MCPClientManager:
         
         # Forza il ricaricamento delle configurazioni
         self.carica_configurazioni_da_db()
+<<<<<<< HEAD
+=======
+    
+    def invalidate_cache(self) -> None:
+        """
+        Invalida la cache di tools/risorse/prompt.
+        Utile quando si sa che le configurazioni sono cambiate.
+        """
+        self._all_tools_cache = []
+        self._config_hash = None
+>>>>>>> dev
 
 
 # Istanza singleton globale

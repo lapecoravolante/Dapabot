@@ -12,6 +12,15 @@ from src.tools.loader import Loader as tools_loader
 from src.tools.gui_tools import mostra_dialog_tools_agent, _on_close_tools_dialog
 from src.mcp.gui_mcp import mostra_dialog_mcp
 from src.mcp.client import get_mcp_client_manager
+<<<<<<< HEAD
+=======
+from src.mcp.gui_mcp_discovery import (
+    mostra_dialog_mcp_discovery,
+    get_selected_mcp_resources,
+    get_selected_mcp_prompt,
+    clear_mcp_selection
+)
+>>>>>>> dev
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Bootstrap iniziale
@@ -268,15 +277,37 @@ def _carica_tools_nei_provider(provider_name: str | None = None):
                     risultato['errors'].append(error_msg)
                     st.toast(f"⚠️ {error_msg}", icon="⚠️")
     
+<<<<<<< HEAD
     # Carica i tools MCP se il toggle è attivo
+=======
+    # Carica tools, risorse e prompt MCP se il toggle è attivo
+>>>>>>> dev
     if st.session_state.get("mcp_enabled", False):
         try:
             manager = get_mcp_client_manager()
             manager.carica_configurazioni_da_db()
+<<<<<<< HEAD
             mcp_tools = asyncio.run(manager.get_tools())
             tools_to_use.extend(mcp_tools)
         except Exception as e:
             error_msg = f"Errore caricamento tools MCP: {str(e)}"
+=======
+            # Usa il nuovo metodo unificato che ritorna (tools, errors)
+            mcp_all_tools, mcp_errors = asyncio.run(manager.get_all_as_langchain_tools())
+            
+            # Aggiungi gli errori MCP alla lista degli errori
+            if mcp_errors:
+                for error in mcp_errors:
+                    error_msg = f"Errore MCP: {error}"
+                    risultato['errors'].append(error_msg)
+                    st.toast(f"⚠️ {error_msg}", icon="⚠️")
+            
+            # Aggiungi i tools caricati (anche se ci sono errori parziali)
+            if mcp_all_tools:
+                tools_to_use.extend(mcp_all_tools)
+        except Exception as e:
+            error_msg = f"Errore caricamento MCP (tools/risorse/prompt): {str(e)}"
+>>>>>>> dev
             risultato['errors'].append(error_msg)
             st.toast(f"⚠️ {error_msg}", icon="⚠️")
     
@@ -454,6 +485,7 @@ def crea_sidebar(providers: dict[str, Provider]):
             value=st.session_state[provider_scelto][sysmsg_key],
             on_change=sincronizza_sessione, args=(sysmsg_key,)
         )
+<<<<<<< HEAD
         
         # CHAT RECENTI            
         with st.container(border=True):            
@@ -585,37 +617,46 @@ def crea_sidebar(providers: dict[str, Provider]):
                 value=st.session_state[provider_scelto][rag_enabled_key],
                 on_change=sincronizza_sessione, args=(rag_enabled_key,)
             )
+=======
+>>>>>>> dev
 
-            # Top-K
-            topk = st.number_input("🔝 Top K", min_value=1, step=1, key=rag_topk_key,
-                value=st.session_state[provider_scelto][rag_topk_key],
-                on_change=sincronizza_sessione, args=(rag_topk_key,)
-            )
-
-            # Modalità di ricerca            
-            modalita_ricerca = st.selectbox("🔦 Modalità di ricerca", modalities, key=rag_modalita_ricerca_key,
-                index=modalities.index(st.session_state[provider_scelto][rag_modalita_ricerca_key]) if st.session_state[provider_scelto][rag_modalita_ricerca_key] in modalities else 0,
-                on_change=sincronizza_sessione, args=(rag_modalita_ricerca_key,)
-            )
-
-            # Modello RAG
-            if modelli_rag:
-                modello_rag = st.selectbox("🕵️ Modello per il RAG", modelli_rag, key=rag_model_key,
-                    index=modelli_rag.index(st.session_state[provider_scelto][rag_model_key]) if st.session_state[provider_scelto][rag_model_key] in modelli_rag else 0,
-                    on_change=sincronizza_sessione, args=(rag_model_key,)
-                )
-            else:
-                st.warning("Nessun modello RAG disponibile.", icon="⚠️")
-                modello_rag=""
-                st.session_state[provider_scelto][rag_model_key]=""
-            # ---- Pulsante globale per aprire la finestra MODALE con TUTTI i vector store ----
-            if st.button("Cache...", key="btn_vs_global", help="Gestisci tutti i vector store di tutti i provider", icon="🗄️"):
-                st.session_state["vs_dialog_global_open"] = True
-        
         # ──────────────────────────────────────────────────────────────────────────────
         # Sezione Chat
         # ──────────────────────────────────────────────────────────────────────────────
         with st.expander("💬 Gestione chat", expanded=False):                
+            # CHAT RECENTI            
+            with st.container(border=True):            
+                def on_ripristina_chat():
+                    val = st.session_state["ripristina_chat"]
+                    if val:
+                        prov, mod = val.split(" | ")
+                        # Aggiorna la chiave per la TabBar, forzando la ricreazione del widget e l'aggiornamento del provider corretto
+                        if st.session_state.get(f"{st.session_state['tabbar_key']}"):
+                            del st.session_state[f"{st.session_state['tabbar_key']}"]
+                        st.session_state["tabbar_key"] = f"tab_{datetime.now().timestamp()}"
+                        # Aggiorna la selezione del modello per quel provider
+                        st.session_state[f"modello_{prov}"] = mod
+                        # Carica i messaggi dal database SOLO se "Autocaricamento dal DB" è abilitato
+                        if prov in providers and st.session_state.get("autoload_chat_db", False):
+                            providers[prov].carica_chat_da_db(modello=mod)
+                
+                chat_recenti = ["",]
+                for nome_prov, prov in providers.items():
+                    modelli = prov.get_lista_modelli_con_chat()
+                    chat_recenti.extend([f"{nome_prov} | {modello}" for modello in modelli])
+                if "chat_db_key" in st.session_state and st.session_state["chat_db_key"]:
+                    chat_su_disco=set([f"{prov} | {mod}" for prov, mod in ConfigurazioneDB.ritorna_chat_recenti()])
+                    chat_recenti=sorted(list(chat_su_disco.union(set(chat_recenti))))
+                if len(chat_recenti)>1:
+                    st.selectbox("📂 Riapri chat recente:", options=chat_recenti, key="ripristina_chat", on_change=on_ripristina_chat)
+                else:
+                    st.caption("📂 Nessuna chat recente")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.checkbox("Elenca chat su DB", key="chat_db_key", help="Se abilitato elenca le chat memorizzate su disco nella lista qui sopra", label_visibility="visible")
+                with col2:
+                    if st.checkbox("Autocaricamento dal DB", key="autoload_chat_db", help="Se abilitato carica automaticamente la cronologia delle chat dal disco (se presenti)", label_visibility="visible"):
+                        provider.carica_chat_da_db()
             colonna1, colonna2, colonna3 = st.columns(3, border=True)
             with colonna1:# PULSANTI DI SALVATAGGIO CHAT
                 with st.popover("💾 Salva..."):
@@ -728,6 +769,122 @@ def crea_sidebar(providers: dict[str, Provider]):
                                 st.success("Tutte le chat eliminate", icon="✅")
                             except Exception as e:
                                 st.error(f"Errore durante l'eliminazione delle chat: {e}")
+                                
+        # Sezione Modalità Agentica
+        with st.expander("🕵️ Modalità Agentica", expanded=bool(st.session_state[provider_scelto][agentic_key])):
+            # Callback per il toggle della modalità agentica
+            def on_toggle_agentic():
+                # Sincronizza il valore del toggle
+                sincronizza_sessione(agentic_key)
+                
+                # Se disabilito modalità agentica, disabilito anche MCP e chiudi discovery
+                if not st.session_state[agentic_key]:
+                    st.session_state["mcp_enabled"] = False
+                    st.session_state["mcp_discovery_open"] = False
+                
+                # Ricarica i tools attivi solo nel provider corrente
+                risultato = _carica_tools_nei_provider(provider_name=provider_scelto)
+            
+            # Toggle Modalità agentica
+            modalita_agentica = st.toggle("Abilita Modalità Agentica", value=st.session_state[provider_scelto][agentic_key],
+                       key=agentic_key, on_change=on_toggle_agentic)
+            
+            # Toggle MCP (accanto al toggle modalità agentica)
+            def on_toggle_mcp():
+                # Se abilito MCP, abilito automaticamente anche modalità agentica
+                if st.session_state.get("mcp_enabled", False):
+                    if not st.session_state[provider_scelto][agentic_key]:
+                        st.session_state[agentic_key] = True
+                        st.session_state[provider_scelto][agentic_key] = True
+                else:
+                    # Se disabilito MCP, chiudi la dialog discovery
+                    st.session_state["mcp_discovery_open"] = False
+                
+                # Ricarica i tools quando MCP viene attivato/disattivato
+                risultato = _carica_tools_nei_provider(provider_name=provider_scelto)
+            
+            # MCP richiede modalità agentica, quindi disabilita il toggle se agentica è off
+            mcp_disabled = not modalita_agentica
+            mcp_enabled = st.toggle("Abilita MCP",
+                       value=st.session_state.get("mcp_enabled", False) and modalita_agentica,
+                       key="mcp_enabled",
+                       on_change=on_toggle_mcp,
+                       disabled=mcp_disabled,
+                       help="Abilita i tools dai server MCP attivi (richiede modalità agentica)")
+            
+            # Pulsanti per configurare tools e MCP
+            col_tools, col_mcp, col_discovery = st.columns(3)
+            
+            with col_tools:
+                if st.button("⚙️ Configura Tools", key="btn_config_tools", use_container_width=True):
+                    st.session_state["tools_dialog_open"] = True
+                    st.session_state["provider_corrente_dialog"] = provider_scelto
+            
+            with col_mcp:
+                if st.button("🔌 Configura MCP", key="btn_config_mcp", use_container_width=True):
+                    st.session_state["mcp_dialog_open"] = True
+            
+            with col_discovery:
+                # Pulsante MCP Discovery - sempre disponibile per esplorare i server
+                if st.button("🔍 MCP Discovery", key="btn_mcp_discovery",
+                           use_container_width=True,
+                           help="Esplora tools, risorse e prompt dai server MCP configurati"):
+                    st.session_state["mcp_discovery_open"] = True
+            
+            # Mostra info sui tools attivi
+            tools_attivi = ConfigurazioneDB.carica_tools_attivi()
+            if tools_attivi:
+                with st.expander("📋 Dettagli tools attivi", expanded=False):
+                    for tool in tools_attivi:
+                        st.write(f"• **{tool['nome_tool']}**")
+            else:
+                st.info("ℹ️ Nessun tool attivo. Configura e attiva i tools dalla finestra di configurazione.")
+            
+            # Mostra info sui server MCP attivi
+            if st.session_state.get("mcp_enabled", False):
+                servers_mcp_attivi = ConfigurazioneDB.carica_mcp_servers_attivi()
+                if servers_mcp_attivi:
+                    with st.expander("🔌 Server MCP attivi", expanded=False):
+                        for server in servers_mcp_attivi:
+                            tipo_icon = "💻" if server['tipo'] == 'local' else "🌐"
+                            st.write(f"{tipo_icon} **{server['nome']}** ({server['tipo']})")
+                else:
+                    st.info("ℹ️ Nessun server MCP attivo. Configura e attiva i server dalla finestra MCP.")
+            
+        # Sezione RAG
+        with st.expander("🔎 RAG", expanded=bool(st.session_state[provider_scelto][rag_enabled_key])):
+            # Toggle RAG
+            rag_abilitato = st.toggle("Abilita RAG", key=rag_enabled_key,
+                value=st.session_state[provider_scelto][rag_enabled_key],
+                on_change=sincronizza_sessione, args=(rag_enabled_key,)
+            )
+
+            # Top-K
+            topk = st.number_input("🔝 Top K", min_value=1, step=1, key=rag_topk_key,
+                value=st.session_state[provider_scelto][rag_topk_key],
+                on_change=sincronizza_sessione, args=(rag_topk_key,)
+            )
+
+            # Modalità di ricerca            
+            modalita_ricerca = st.selectbox("🔦 Modalità di ricerca", modalities, key=rag_modalita_ricerca_key,
+                index=modalities.index(st.session_state[provider_scelto][rag_modalita_ricerca_key]) if st.session_state[provider_scelto][rag_modalita_ricerca_key] in modalities else 0,
+                on_change=sincronizza_sessione, args=(rag_modalita_ricerca_key,)
+            )
+
+            # Modello RAG
+            if modelli_rag:
+                modello_rag = st.selectbox("🧩 Modello per il RAG", modelli_rag, key=rag_model_key,
+                    index=modelli_rag.index(st.session_state[provider_scelto][rag_model_key]) if st.session_state[provider_scelto][rag_model_key] in modelli_rag else 0,
+                    on_change=sincronizza_sessione, args=(rag_model_key,)
+                )
+            else:
+                st.warning("Nessun modello RAG disponibile.", icon="⚠️")
+                modello_rag=""
+                st.session_state[provider_scelto][rag_model_key]=""
+            # ---- Pulsante globale per aprire la finestra MODALE con TUTTI i vector store ----
+            if st.button("Cache...", key="btn_vs_global", help="Gestisci tutti i vector store di tutti i provider", icon="🗄️"):
+                st.session_state["vs_dialog_global_open"] = True
+
         # Salva configurazione e gestione DB (in fondo alla sidebar)
         col_salva, col_db = st.columns(2)
         with col_salva:
@@ -735,7 +892,7 @@ def crea_sidebar(providers: dict[str, Provider]):
         with col_db:
             # Link per gestione avanzata DB config.db
             # sqlite-web viene avviato automaticamente all'avvio dell'applicazione
-            url = "http://127.0.0.1:8080"
+            url = "http://127.0.0.1:6969"
             st.markdown(
                 f'<a href="{url}" target="_blank">'
                 '<button style="width:100%; padding:8px; font-size:1rem; border:1px solid #ccc; border-radius:4px; cursor:pointer; background-color:white;">'
@@ -763,6 +920,13 @@ def crea_sidebar(providers: dict[str, Provider]):
     # ---- Render della finestra modale configurazione MCP ----
     if st.session_state.get("mcp_dialog_open", False):
         mostra_dialog_mcp()
+<<<<<<< HEAD
+=======
+    
+    # ---- Render della finestra modale MCP Discovery ----
+    if st.session_state.get("mcp_discovery_open", False):
+        mostra_dialog_mcp_discovery()
+>>>>>>> dev
 
     return provider_scelto, messaggio_di_sistema
 
@@ -773,23 +937,64 @@ def generate_response(prompt_utente, messaggio_di_sistema, provider_scelto: Prov
     """
     Genera la risposta del modello o dell'agent.
     Se la modalità agentica è attiva, mostra un feedback visivo delle operazioni.
+    Integra risorse e prompt dai server MCP se selezionati.
     """
-    # Chiudi il dialog dei tools se è aperto (evita che si riapra dopo l'invio del messaggio)
+    # Chiudi i dialog se aperti (evita che si riaprano dopo l'invio del messaggio)
     if st.session_state.get("tools_dialog_open", False):
         st.session_state["tools_dialog_open"] = False
+    if st.session_state.get("mcp_discovery_open", False):
+        st.session_state["mcp_discovery_open"] = False
+    
+    # Ottieni risorse e prompt MCP selezionati
+    mcp_resources = get_selected_mcp_resources()
+    mcp_prompt = get_selected_mcp_prompt()
     
     # Prepara la lista dei messaggi da inviare
     messaggi_da_inviare = []
-    # Messaggio di sistema (opzionale)
-    if messaggio_di_sistema:
-        messaggi_da_inviare.append(Messaggio(testo=messaggio_di_sistema, ruolo="system"))
+    
+    # Messaggio di sistema: usa il prompt MCP se selezionato, altrimenti il messaggio di sistema normale
+    system_message_text = messaggio_di_sistema
+    if mcp_prompt:
+        # Costruisci il messaggio di sistema dal prompt MCP
+        prompt_text = f"[MCP Prompt: {mcp_prompt['name']}]\n"
+        if mcp_prompt.get('description'):
+            prompt_text += f"{mcp_prompt['description']}\n"
+        
+        # Se c'è anche un messaggio di sistema, combinali
+        if messaggio_di_sistema:
+            system_message_text = f"{prompt_text}\n{messaggio_di_sistema}"
+        else:
+            system_message_text = prompt_text
+    
+    if system_message_text:
+        messaggi_da_inviare.append(Messaggio(testo=system_message_text, ruolo="system"))
+    
     # Messaggio utente
     messaggio_utente = Messaggio(ruolo="user")
-    if prompt_utente.text:
-        messaggio_utente.set_testo(prompt_utente.text)
+    
+    # Testo del messaggio utente
+    user_text = prompt_utente.text if prompt_utente.text else ""
+    
+    # Aggiungi informazioni sulle risorse MCP se presenti
+    if mcp_resources:
+        resources_text = "\n\n[Risorse MCP allegate]:\n"
+        for resource in mcp_resources:
+            resources_text += f"- {resource['name']} ({resource['uri']})\n"
+            if resource.get('description'):
+                resources_text += f"  Descrizione: {resource['description']}\n"
+        user_text += resources_text
+    
+    if user_text:
+        messaggio_utente.set_testo(user_text)
+    
+    # Allegati dal file uploader
     if prompt_utente["files"]:
         messaggio_utente.set_allegati(prompt_utente["files"])
+    
     messaggi_da_inviare.append(messaggio_utente)
+    
+    # Pulisci la selezione MCP dopo l'invio
+    clear_mcp_selection()
     
     # Invia i messaggi con feedback visivo se modalità agentica è attiva
     if provider_scelto.get_modalita_agentica():
