@@ -7,6 +7,7 @@ import streamlit as st
 import asyncio
 from typing import Dict, List, Any, Optional
 from src.mcp.client import get_mcp_client_manager
+from src.ConfigurazioneDB import ConfigurazioneDB
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -56,7 +57,13 @@ def _search_tools(tools: List[Any], query: str) -> List[Any]:
 # Componenti UI
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _render_server_list(servers: List[str]) -> Optional[str]:
+def _on_server_change():
+    """Callback quando cambia il server selezionato"""
+    # Resetta la ricerca quando cambia server
+    st.session_state.mcp_search_query = ""
+
+
+def _render_server_list(servers: List[str], preselected: Optional[str] = None) -> Optional[str]:
     """Renderizza la lista dei server MCP"""
     if not servers:
         st.info("Nessun server MCP configurato")
@@ -64,11 +71,18 @@ def _render_server_list(servers: List[str]) -> Optional[str]:
     
     st.subheader("Server MCP")
     
+    # Determina l'indice del server preselezionato
+    default_index = 0
+    if preselected and preselected in servers:
+        default_index = servers.index(preselected)
+    
     selected = st.radio(
         "Seleziona server",
         servers,
+        index=default_index,
         key="mcp_server_selector",
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        on_change=_on_server_change
     )
     
     return selected
@@ -116,18 +130,17 @@ def _render_tool_item(tool: Any, index: int, tool_type: str):
                 st.caption("Schema argomenti non disponibile")
 
 
-def _render_tools_tab(tools: List[Any]):
+def _render_tools_tab(tools: List[Any], server_name: str):
     """Renderizza il tab dei tools"""
     st.subheader("🔧 Tools")
     
-    # Barra di ricerca
+    # Barra di ricerca con key dinamica per forzare reset al cambio server
     search_query = st.text_input(
         "🔍 Cerca tools",
-        value=st.session_state.mcp_search_query,
-        key="tool_search",
+        value="",  # Sempre vuoto, non usare session_state
+        key=f"tool_search_{server_name}",
         placeholder="Cerca per nome o descrizione..."
     )
-    st.session_state.mcp_search_query = search_query
     
     # Applica filtro di ricerca
     filtered_tools = _search_tools(tools, search_query)
@@ -140,23 +153,24 @@ def _render_tools_tab(tools: List[Any]):
     else:
         st.write(f"**{len(filtered_tools)} tools trovati**")
         
-        # Renderizza ogni tool
-        for idx, tool in enumerate(filtered_tools):
-            _render_tool_item(tool, idx, 'tool')
+        # Container con scrollbar per liste lunghe
+        with st.container(height=500):
+            # Renderizza ogni tool
+            for idx, tool in enumerate(filtered_tools):
+                _render_tool_item(tool, idx, 'tool')
 
 
-def _render_resources_tab(resources: List[Any]):
+def _render_resources_tab(resources: List[Any], server_name: str):
     """Renderizza il tab delle risorse"""
     st.subheader("📄 Risorse")
     
-    # Barra di ricerca
+    # Barra di ricerca con key dinamica per forzare reset al cambio server
     search_query = st.text_input(
         "🔍 Cerca risorse",
-        value=st.session_state.mcp_search_query,
-        key="resource_search",
+        value="",  # Sempre vuoto, non usare session_state
+        key=f"resource_search_{server_name}",
         placeholder="Cerca per nome o descrizione..."
     )
-    st.session_state.mcp_search_query = search_query
     
     # Applica filtro di ricerca
     filtered_resources = _search_tools(resources, search_query)
@@ -170,23 +184,24 @@ def _render_resources_tab(resources: List[Any]):
         st.write(f"**{len(filtered_resources)} risorse trovate**")
         st.caption("Le risorse sono esposte come tools che l'agent può chiamare per ottenere contenuti.")
         
-        # Renderizza ogni risorsa
-        for idx, resource in enumerate(filtered_resources):
-            _render_tool_item(resource, idx, 'resource')
+        # Container con scrollbar per liste lunghe
+        with st.container(height=500):
+            # Renderizza ogni risorsa
+            for idx, resource in enumerate(filtered_resources):
+                _render_tool_item(resource, idx, 'resource')
 
 
-def _render_prompts_tab(prompts: List[Any]):
+def _render_prompts_tab(prompts: List[Any], server_name: str):
     """Renderizza il tab dei prompt"""
     st.subheader("💬 Prompt")
     
-    # Barra di ricerca
+    # Barra di ricerca con key dinamica per forzare reset al cambio server
     search_query = st.text_input(
         "🔍 Cerca prompt",
-        value=st.session_state.mcp_search_query,
-        key="prompt_search",
+        value="",  # Sempre vuoto, non usare session_state
+        key=f"prompt_search_{server_name}",
         placeholder="Cerca per nome o descrizione..."
     )
-    st.session_state.mcp_search_query = search_query
     
     # Applica filtro di ricerca
     filtered_prompts = _search_tools(prompts, search_query)
@@ -200,9 +215,11 @@ def _render_prompts_tab(prompts: List[Any]):
         st.write(f"**{len(filtered_prompts)} prompt trovati**")
         st.caption("I prompt sono esposti come tools che l'agent può chiamare per ottenere template di messaggi.")
         
-        # Renderizza ogni prompt
-        for idx, prompt in enumerate(filtered_prompts):
-            _render_tool_item(prompt, idx, 'prompt')
+        # Container con scrollbar per liste lunghe
+        with st.container(height=500):
+            # Renderizza ogni prompt
+            for idx, prompt in enumerate(filtered_prompts):
+                _render_tool_item(prompt, idx, 'prompt')
 
 
 def _render_summary_info(tools_count: int, resources_count: int, prompts_count: int):
@@ -234,6 +251,7 @@ def _render_summary_info(tools_count: int, resources_count: int, prompts_count: 
 async def _load_preview_data(server_name: str) -> Dict[str, List[Any]]:
     """
     Carica i dati di preview per un server specifico.
+    Crea un client MCP dedicato solo per questo server.
     
     Args:
         server_name: Nome del server
@@ -241,13 +259,52 @@ async def _load_preview_data(server_name: str) -> Dict[str, List[Any]]:
     Returns:
         Dizionario con tools, resources e prompts
     """
-    manager = get_mcp_client_manager()
+    from mcp_use import MCPClient
+    from src.mcp.langchain_adapter import MCPLangChainAdapter
     
-    # Ottieni l'adapter
-    adapter = manager.get_adapter()
-    client = manager.get_client()
+    # Carica la configurazione del server specifico dal DB
+    servers_db = ConfigurazioneDB.carica_mcp_servers()
+    server_config = next((s for s in servers_db if s['nome'] == server_name), None)
     
-    # Crea tutti gli elementi
+    if not server_config:
+        return {'tools': [], 'resources': [], 'prompts': []}
+    
+    # Costruisci la configurazione nel formato mcp-use
+    tipo = server_config['tipo']
+    config_data = server_config['configurazione']
+    
+    if tipo == 'local':
+        mcp_config = {
+            'command': config_data.get('comando', ''),
+            'args': config_data.get('args', []),
+            'env': config_data.get('env', {})
+        }
+    elif tipo == 'remote':
+        mcp_config = {
+            'url': config_data.get('url', '')
+        }
+        
+        # Aggiungi headers se presenti
+        headers = config_data.get('headers', {})
+        if headers:
+            mcp_config['headers'] = headers
+        
+        # Gestione autenticazione
+        if config_data.get('api_key'):
+            mcp_config['auth'] = config_data['api_key']
+        elif config_data.get('oauth_config'):
+            mcp_config['auth'] = config_data['oauth_config']
+    else:
+        return {'tools': [], 'resources': [], 'prompts': []}
+    
+    # Crea un client MCP dedicato solo per questo server
+    client_config = {"mcpServers": {server_name: mcp_config}}
+    client = MCPClient(config=client_config)
+    
+    # Crea un adapter dedicato
+    adapter = MCPLangChainAdapter()
+    
+    # Carica tutti gli elementi per questo server
     await adapter.create_all(client)
     
     return {
@@ -261,15 +318,22 @@ async def _load_preview_data(server_name: str) -> Dict[str, List[Any]]:
 # Dialog principale
 # ──────────────────────────────────────────────────────────────────────────────
 
-@st.dialog("🔍 MCP Discovery - Preview Server", width="large")
+def _on_close_discovery_dialog():
+    """Callback chiamato quando la dialog discovery viene chiusa"""
+    st.session_state["mcp_discovery_open"] = False
+
+
+@st.dialog("🔍 MCP Discovery - Preview Server", width="large", dismissible=True, on_dismiss=lambda: _on_close_discovery_dialog())
 def mostra_dialog_mcp_discovery():
     """Mostra il dialog per il discovery di tools, risorse e prompt MCP"""
     _init_discovery_state()
     
-    # Ottieni lista server
+    # Ottieni lista di TUTTI i server (non solo attivi) direttamente dal DB
+    servers_db = ConfigurazioneDB.carica_mcp_servers()
+    servers = [s['nome'] for s in servers_db]
+    
+    # Ottieni il manager per caricare i dati
     manager = get_mcp_client_manager()
-    manager.carica_configurazioni_da_db()
-    servers = manager.get_server_names()
     
     if not servers:
         st.warning("Nessun server MCP configurato. Configura almeno un server nella sezione MCP.")
@@ -282,7 +346,11 @@ def mostra_dialog_mcp_discovery():
     col_servers, col_content = st.columns([0.25, 0.75])
     
     with col_servers:
-        selected_server = _render_server_list(servers)
+        # Passa il server preselezionato al radio button
+        preselected = st.session_state.get("mcp_selected_server")
+        selected_server = _render_server_list(servers, preselected)
+        
+        # Aggiorna il server selezionato
         st.session_state.mcp_selected_server = selected_server
         
         st.divider()
@@ -324,13 +392,13 @@ def mostra_dialog_mcp_discovery():
             ])
             
             with tab_tools:
-                _render_tools_tab(tools)
+                _render_tools_tab(tools, selected_server)
             
             with tab_resources:
-                _render_resources_tab(resources)
+                _render_resources_tab(resources, selected_server)
             
             with tab_prompts:
-                _render_prompts_tab(prompts)
+                _render_prompts_tab(prompts, selected_server)
     
     # Pulsante chiudi
     st.divider()

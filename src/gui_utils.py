@@ -513,9 +513,10 @@ def crea_sidebar(providers: dict[str, Provider]):
                 # Sincronizza il valore del toggle
                 sincronizza_sessione(agentic_key)
                 
-                # Se disabilito modalità agentica, disabilito anche MCP
+                # Se disabilito modalità agentica, disabilito anche MCP e chiudi discovery
                 if not st.session_state[agentic_key]:
                     st.session_state["mcp_enabled"] = False
+                    st.session_state["mcp_discovery_open"] = False
                 
                 # Ricarica i tools attivi solo nel provider corrente
                 risultato = _carica_tools_nei_provider(provider_name=provider_scelto)
@@ -531,6 +532,9 @@ def crea_sidebar(providers: dict[str, Provider]):
                     if not st.session_state[provider_scelto][agentic_key]:
                         st.session_state[agentic_key] = True
                         st.session_state[provider_scelto][agentic_key] = True
+                else:
+                    # Se disabilito MCP, chiudi la dialog discovery
+                    st.session_state["mcp_discovery_open"] = False
                 
                 # Ricarica i tools quando MCP viene attivato/disattivato
                 risultato = _carica_tools_nei_provider(provider_name=provider_scelto)
@@ -557,11 +561,10 @@ def crea_sidebar(providers: dict[str, Provider]):
                     st.session_state["mcp_dialog_open"] = True
             
             with col_discovery:
-                # Pulsante MCP Discovery - disponibile solo se MCP è abilitato
+                # Pulsante MCP Discovery - sempre disponibile per esplorare i server
                 if st.button("🔍 MCP Discovery", key="btn_mcp_discovery",
                            use_container_width=True,
-                           disabled=not st.session_state.get("mcp_enabled", False),
-                           help="Esplora risorse e prompt dai server MCP" if st.session_state.get("mcp_enabled", False) else "Abilita MCP per usare questa funzione"):
+                           help="Esplora tools, risorse e prompt dai server MCP configurati"):
                     st.session_state["mcp_discovery_open"] = True
             
             # Mostra info sui tools attivi

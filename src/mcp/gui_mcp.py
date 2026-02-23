@@ -144,17 +144,19 @@ def mostra_dialog_mcp():
                             st.rerun()
                     
                     with col_preview:
-                        # Pulsante preview (solo per server attivi)
-                        if server.get('attivo', False):
-                            if st.button(
-                                "🔍",
-                                key=f"preview_mcp_{server_name}",
-                                help="Preview tools/risorse/prompt",
-                                use_container_width=True
-                            ):
-                                st.session_state.mcp_selected_server = server_name
-                                st.session_state.mcp_discovery_open = True
-                                st.rerun()
+                        # Pulsante preview per tutti i server
+                        if st.button(
+                            "🔍",
+                            key=f"preview_mcp_{server_name}",
+                            help="Preview tools/risorse/prompt",
+                            use_container_width=True
+                        ):
+                            # Chiudi prima la dialog MCP corrente
+                            st.session_state["mcp_dialog_open"] = False
+                            # Poi apri la dialog discovery
+                            st.session_state.mcp_selected_server = server_name
+                            st.session_state.mcp_discovery_open = True
+                            st.rerun()
             else:
                 st.info("Nessun server trovato")
     
