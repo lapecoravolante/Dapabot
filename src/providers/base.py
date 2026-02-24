@@ -210,9 +210,10 @@ class Provider(ABC):
             self._client=None
             raise Exception(errore)
     
-    def invia_messaggi(self, messaggi: list[Messaggio], status_container=None):
+    async def invia_messaggi(self, messaggi: list[Messaggio], status_container=None):
         """
         Invia i messaggi al modello multimodale e aggiorna la cronologia.
+        Versione asincrona per supportare streaming in tempo reale dei tool MCP.
         
         Args:
             messaggi: Lista di messaggi da inviare.
@@ -274,30 +275,61 @@ class Provider(ABC):
                     
                     status_container.write("🧠 Analisi del problema in corso...")
                 
-                # Invoca l'agent con i messaggi
-                risposta = self._agent.invoke({"messages": cronologia_completa})
+                # Usa streaming asincrono per aggiornamenti in tempo reale
+                risposta_completa = None
                 
-                # Mostra feedback per i messaggi intermedi (tool calls)
-                if status_container and "messages" in risposta:
-                    for idx, msg in enumerate(risposta["messages"][:-1]):  # Escludi l'ultimo (risposta finale)
-                        # Verifica se il messaggio contiene tool calls
-                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                            for tool_call in msg.tool_calls:
-                                tool_name = tool_call.get('name', 'Unknown')
-                                status_container.write(f"🔧 Utilizzo tool: **{tool_name}**")
-                        # Verifica se è una risposta di un tool
-                        elif hasattr(msg, 'type') and msg.type == 'tool':
-                            status_container.write(f"✅ Tool completato")
+                async for chunk in self._agent.astream({"messages": cronologia_completa}):
+                    if "messages" in chunk:
+                        for msg in chunk["messages"]:
+                            # Verifica se il messaggio contiene tool calls
+                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                for tool_call in msg.tool_calls:
+                                    tool_name = tool_call.get('name', 'Unknown')
+                                    # Mostra ogni chiamata al tool (anche se ripetuta)
+                                    if status_container:
+                                        status_container.write(f"🔧 Utilizzo tool: **{tool_name}**")
+                            # Verifica se è una risposta di un tool
+                            elif hasattr(msg, 'type') and msg.type == 'tool':
+                                if status_container:
+                                    status_container.write(f"✅ Tool completato")
+                    
+                    # Salva l'ultimo chunk come risposta completa
+                    risposta_completa = chunk
                 
-                # Estrae l'ultimo messaggio dell'agent (risposta finale, senza messaggi intermedi)
-                ultimo_messaggio = risposta["messages"][-1]
-                testo_risposta = getattr(ultimo_messaggio, "content", str(ultimo_messaggio))
+                # Estrae l'ultimo messaggio dell'agent (risposta finale)
+                if not risposta_completa:
+                    raise Exception("L'agent non ha prodotto nessuna risposta. Verifica che l'agent sia configurato correttamente e che i tool siano disponibili.")
+                
+                # Gestisce diversi formati di risposta dall'agent
+                # Formato 1: {'messages': [...]}
+                # Formato 2: {'model': {'messages': [...]}}
+                messages_list = None
+                if "messages" in risposta_completa:
+                    messages_list = risposta_completa["messages"]
+                elif "model" in risposta_completa and isinstance(risposta_completa["model"], dict):
+                    if "messages" in risposta_completa["model"]:
+                        messages_list = risposta_completa["model"]["messages"]
+                
+                if not messages_list:
+                    raise Exception(f"Formato risposta agent non valido. Chunk ricevuto: {risposta_completa}")
+                
+                if not messages_list:
+                    raise Exception("L'agent ha prodotto una risposta vuota. Verifica la configurazione del modello e dei tool.")
+                
+                ultimo_messaggio = messages_list[-1]
+                testo_risposta = getattr(ultimo_messaggio, "content", "")
+                
+                # Se il contenuto è vuoto o solo spazi, è normale quando l'agent usa solo tool
+                if not testo_risposta or not testo_risposta.strip():
+                    testo_risposta = "ℹ️ L'agent ha completato l'operazione utilizzando i tool disponibili."
+                    if status_container:
+                        status_container.write("ℹ️ Nessuna risposta testuale dal modello (solo tool utilizzati)")
+                else:
+                    if status_container:
+                        status_container.write("✅ Risposta generata")
                 
                 # Crea AIMessage senza la sezione "tools"
                 m = AIMessage(content=testo_risposta)
-                
-                if status_container:
-                    status_container.write("✅ Risposta generata")
             else:
                 # Modalità normale (codice esistente)
                 base_chain = prompt | self._client
