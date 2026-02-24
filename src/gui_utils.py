@@ -809,13 +809,13 @@ def generate_response(prompt_utente, messaggio_di_sistema, provider_scelto: Prov
     if provider_scelto.get_modalita_agentica():
         # Crea un container per il feedback con st.status()
         with st.status("🤖 Agent in azione...", expanded=True) as status:
-            # Passa il container di status al metodo invia_messaggi
-            provider_scelto.invia_messaggi(messaggi_da_inviare, status_container=status)
+            # Passa il container di status al metodo invia_messaggi (ora asincrono)
+            asyncio.run(provider_scelto.invia_messaggi(messaggi_da_inviare, status_container=status))
             # Aggiorna lo stato finale
             status.update(label="✅ Operazione completata!", state="complete")
     else:
-        # Modalità normale senza feedback visivo
-        provider_scelto.invia_messaggi(messaggi_da_inviare)
+        # Modalità normale senza feedback visivo (anche questa è asincrona ora)
+        asyncio.run(provider_scelto.invia_messaggi(messaggi_da_inviare))
     
 def mostra_cronologia_chat(cronologia: list[Messaggio]):    
     for msg in cronologia:

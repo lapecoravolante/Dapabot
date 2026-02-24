@@ -178,6 +178,11 @@ def mostra_dialog_mcp():
                                     st.session_state["selected_mcp_server"] = None
                                     st.session_state["mcp_server_config_temp"] = {}
                                 
+                                # Rimuovi il server dalla lista dei selezionati nel multiselect
+                                if "mcp_servers_selezionati_temp" in st.session_state:
+                                    if server_name in st.session_state["mcp_servers_selezionati_temp"]:
+                                        st.session_state["mcp_servers_selezionati_temp"].remove(server_name)
+                                
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Errore eliminazione: {e}")
