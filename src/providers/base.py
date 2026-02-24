@@ -146,9 +146,6 @@ class Provider(ABC):
             self._agent = create_agent(
                 model=self._client,
                 tools=self._tools,
-                # verbose=True,  # Imposta True per debug (stampa pensieri/azioni)
-                # max_iterations=5,  # Opzionale: limita loop ReAct
-                # system_prompt="You are a helpful assistant."
             )
         except ImportError as e:
             raise Exception(f"LangChain agents non disponibile: {e}. Assicurati di avere langchain-agents e langgraph installati.")
