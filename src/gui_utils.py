@@ -12,12 +12,7 @@ from src.tools.loader import Loader as tools_loader
 from src.tools.gui_tools import mostra_dialog_tools_agent, _on_close_tools_dialog
 from src.mcp.gui_mcp import mostra_dialog_mcp
 from src.mcp.client import get_mcp_client_manager
-from src.mcp.gui_mcp_discovery import (
-    mostra_dialog_mcp_discovery,
-    get_selected_mcp_resources,
-    get_selected_mcp_prompt,
-    clear_mcp_selection
-)
+from src.mcp.gui_mcp_discovery import mostra_dialog_mcp_discovery
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Bootstrap iniziale
@@ -786,52 +781,20 @@ def generate_response(prompt_utente, messaggio_di_sistema, provider_scelto: Prov
     """
     Genera la risposta del modello o dell'agent.
     Se la modalità agentica è attiva, mostra un feedback visivo delle operazioni.
-    Integra risorse e prompt dai server MCP se selezionati.
     """
-    # Chiudi i dialog se aperti (evita che si riaprano dopo l'invio del messaggio)
-    if st.session_state.get("tools_dialog_open", False):
-        st.session_state["tools_dialog_open"] = False
-    if st.session_state.get("mcp_discovery_open", False):
-        st.session_state["mcp_discovery_open"] = False
-    
-    # Ottieni risorse e prompt MCP selezionati
-    mcp_resources = get_selected_mcp_resources()
-    mcp_prompt = get_selected_mcp_prompt()
     
     # Prepara la lista dei messaggi da inviare
     messaggi_da_inviare = []
     
-    # Messaggio di sistema: usa il prompt MCP se selezionato, altrimenti il messaggio di sistema normale
-    system_message_text = messaggio_di_sistema
-    if mcp_prompt:
-        # Costruisci il messaggio di sistema dal prompt MCP
-        prompt_text = f"[MCP Prompt: {mcp_prompt['name']}]\n"
-        if mcp_prompt.get('description'):
-            prompt_text += f"{mcp_prompt['description']}\n"
-        
-        # Se c'è anche un messaggio di sistema, combinali
-        if messaggio_di_sistema:
-            system_message_text = f"{prompt_text}\n{messaggio_di_sistema}"
-        else:
-            system_message_text = prompt_text
-    
-    if system_message_text:
-        messaggi_da_inviare.append(Messaggio(testo=system_message_text, ruolo="system"))
+    # Messaggio di sistema
+    if messaggio_di_sistema:
+        messaggi_da_inviare.append(Messaggio(testo=messaggio_di_sistema, ruolo="system"))
     
     # Messaggio utente
     messaggio_utente = Messaggio(ruolo="user")
     
     # Testo del messaggio utente
     user_text = prompt_utente.text if prompt_utente.text else ""
-    
-    # Aggiungi informazioni sulle risorse MCP se presenti
-    if mcp_resources:
-        resources_text = "\n\n[Risorse MCP allegate]:\n"
-        for resource in mcp_resources:
-            resources_text += f"- {resource['name']} ({resource['uri']})\n"
-            if resource.get('description'):
-                resources_text += f"  Descrizione: {resource['description']}\n"
-        user_text += resources_text
     
     if user_text:
         messaggio_utente.set_testo(user_text)
@@ -841,9 +804,6 @@ def generate_response(prompt_utente, messaggio_di_sistema, provider_scelto: Prov
         messaggio_utente.set_allegati(prompt_utente["files"])
     
     messaggi_da_inviare.append(messaggio_utente)
-    
-    # Pulisci la selezione MCP dopo l'invio
-    clear_mcp_selection()
     
     # Invia i messaggi con feedback visivo se modalità agentica è attiva
     if provider_scelto.get_modalita_agentica():
