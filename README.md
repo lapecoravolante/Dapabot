@@ -51,14 +51,17 @@ podman run -d \
 
 ## 📚 Documentazione
 
-La documentazione completa è disponibile nella directory [`docs/`](docs/):
+La documentazione completa è disponibile in due modi:
 
-- **[Manuale Utente](docs/Manuale_Utente_DAPABot.md)**: Guida completa all'utilizzo di DAPABot
-  - Introduzione e tecnologie
-  - Installazione (locale e container)
-  - Utilizzo delle funzionalità (Chat, RAG, Modalità Agentica)
-  - Guida per lo sviluppatore
-  - Struttura del database
+1. **Dall'interfaccia**: Clicca sul pulsante "📖 Manuale Utente" in fondo alla sidebar
+2. **File Markdown**: Consulta il [Manuale Utente](docs/Manuale_Utente_DAPABot.md) nella directory `docs/`
+
+Il manuale include:
+- Introduzione e tecnologie utilizzate
+- Installazione (locale e container)
+- Utilizzo delle funzionalità (Chat, RAG, Modalità Agentica, MCP)
+- Guida per lo sviluppatore con diagrammi
+- Struttura del database
 
 ## 🛠️ Tecnologie utilizzate
 

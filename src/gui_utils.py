@@ -1,5 +1,7 @@
 import streamlit as st
 import extra_streamlit_components as stx
+from pathlib import Path
+import re
 import base64
 import asyncio
 from datetime import datetime
@@ -384,10 +386,53 @@ def mostra_dialog_vectorestores_globale():
         st.rerun()
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Manuale Utente
+# ──────────────────────────────────────────────────────────────────────────────
+@st.dialog("📖 Manuale Utente DAPABot", width="large")
+def mostra_manuale():
+    """Mostra il manuale utente in un dialog con scrollbar."""
+    manual_path = Path(__file__).parent.parent / "docs" / "Manuale_Utente_DAPABot.md"
+    images_dir = Path(__file__).parent.parent / "docs" / "images"
+    
+    try:
+        with open(manual_path, 'r', encoding='utf-8') as f:
+            md_content = f.read()
+        
+        # Container con altezza fissa per garantire la scrollbar
+        with st.container(height=600):
+            # Dividi il contenuto in sezioni per gestire le immagini
+            sections = re.split(r'(!\[.*?\]\(.*?\))', md_content)
+            
+            for section in sections:
+                # Se è un'immagine
+                if section.startswith('!['):
+                    # Estrai il path dell'immagine
+                    match = re.match(r'!\[.*?\]\((.*?)\)', section)
+                    if match:
+                        img_path = match.group(1)
+                        full_img_path = images_dir / img_path.replace('images/', '')
+                        if full_img_path.exists():
+                            st.image(str(full_img_path), use_container_width=True)
+                else:
+                    # Altrimenti è testo markdown
+                    if section.strip():
+                        st.markdown(section)
+    
+    except FileNotFoundError:
+        st.error("❌ Manuale non trovato. Assicurati che il file `docs/Manuale_Utente_DAPABot.md` esista.")
+    except Exception as e:
+        st.error(f"❌ Errore durante il caricamento del manuale: {str(e)}")
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Sidebar
 # ──────────────────────────────────────────────────────────────────────────────
 def crea_sidebar(providers: dict[str, Provider]):
-    st.logo(image="src/img/logo.png", size="large")
+    # Logo
+    st.logo(
+        image="src/img/logo.png",
+        size="large",
+        icon_image="src/img/logo.png"
+    )
     
     with st.sidebar:
         """
@@ -747,6 +792,7 @@ def crea_sidebar(providers: dict[str, Provider]):
                 '</button></a>',
                 unsafe_allow_html=True
             )
+        
         # Aggiorna provider runtime (usa i valori restituiti dai widget)
         try:
             provider.set_client(modello_scelto, api_key)
@@ -754,6 +800,14 @@ def crea_sidebar(providers: dict[str, Provider]):
             provider.set_rag(attivo=rag_abilitato, topk=topk, modello=modello_rag, modalita_ricerca=modalita_ricerca)
         except Exception as e:
             st.toast(f"Errore nell'impostazione dei parametri: {e}", icon="⛔")
+        
+        # Pulsante per aprire il manuale utente
+        st.divider()
+        if st.button("📖 Manuale Utente", key="btn_manuale", use_container_width=True,
+                     help="Apri il manuale utente completo di DAPABot"):
+            st.session_state["manuale_dialog_open"] = True
+            st.rerun()
+    
     #st.sidebar.json(st.session_state)
     
     # ---- Render della finestra modale vector stores ----
@@ -771,6 +825,10 @@ def crea_sidebar(providers: dict[str, Provider]):
     # ---- Render della finestra modale MCP Discovery ----
     if st.session_state.get("mcp_discovery_open", False):
         mostra_dialog_mcp_discovery()
+    
+    # ---- Render della finestra modale Manuale Utente ----
+    if st.session_state.get("manuale_dialog_open", False):
+        mostra_manuale()
 
     return provider_scelto, messaggio_di_sistema
 
