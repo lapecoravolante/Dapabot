@@ -23,6 +23,11 @@ class Github(Tool):
             },
             parametri_iniziali= {"include_release_tools": False}
         )
+        
+        # Descrizioni per i parametri nella GUI
+        self._param_descriptions = {
+            "include_release_tools": "Se True, include i tool per la gestione delle release GitHub"
+        }
 
     def get_tool(self):
         return GitHubToolkit.from_github_api_wrapper(

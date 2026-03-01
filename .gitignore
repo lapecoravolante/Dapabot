@@ -9,12 +9,9 @@ config.json
 uploads/
 vectorstore_cache/
 config.db
+config.db-shm
+config.db-wal
 
 # Virtual environments
 .venv
 .vscode/
-test_mcp_server.py
-<<<<<<< HEAD
-=======
-test_mcp_discovery.py
->>>>>>> dev

@@ -19,6 +19,14 @@ class Wikipedia(Tool):
                 "doc_content_chars_max": 4000
             }
         )
+        
+        # Descrizioni per i parametri nella GUI
+        self._param_descriptions = {
+            "lang": "Codice lingua per le ricerche (es: it, en, fr, de, es)",
+            "top_k_results": "Numero di risultati top-scored da restituire",
+            "load_all_available_meta": "Se True, carica tutti i metadati disponibili; se False, solo i metadati essenziali",
+            "doc_content_chars_max": "Lunghezza massima del contenuto del documento (caratteri)"
+        }
 
     def get_tool(self):
         # Crea il wrapper Arxiv con i parametri configurati

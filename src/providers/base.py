@@ -162,12 +162,14 @@ class Provider(ABC):
         return self._base_url
     
     # Abilita o disabilita l'uso del RAG
-    def set_rag(self, attivo: bool = False, topk: int = 3, modello: str = "", upload_dir="uploads/", modalita_ricerca=Rag.AVAILABLE_SEARCH_MODALITIES[0]):
+    def set_rag(self, attivo: bool = False, topk: int = 3, modello: str = "", upload_dir="uploads/", modalita_ricerca=Rag.AVAILABLE_SEARCH_MODALITIES[0], status_callback=None):
         self._rag.set_attivo(attivo)
         self._rag.set_topk(topk)
         self._rag.set_modello(modello)
         self._rag.set_upload_dir(upload_dir)
         self._rag.set_modalita_ricerca(modalita_ricerca)
+        if status_callback:
+            self._rag._status_callback = status_callback
         
     def get_rag(self):
         return self._rag
@@ -418,6 +420,37 @@ class Provider(ABC):
     def lista_modelli(self, api_key=""):
         pass
 
+    def _esegui_rag_con_feedback(self):
+        """
+        Esegue il RAG con feedback visivo tramite st.status().
+        Questo metodo centralizza la logica comune a tutti i provider.
+        
+        Returns:
+            Lista di allegati risultanti dal RAG
+            
+        Raises:
+            Exception: Se si verifica un errore durante l'elaborazione RAG
+        """
+        import streamlit as st
+        
+        # Crea un container per i messaggi di stato
+        status_container = st.status("🔄 Elaborazione RAG in corso...", expanded=True)
+        
+        def status_callback(message: str):
+            """Callback per mostrare i messaggi di stato durante il RAG."""
+            status_container.write(message)
+        
+        # Imposta il callback per il feedback visivo
+        self._rag._status_callback = status_callback
+        
+        try:
+            result = self._rag.run()
+            status_container.update(label="✅ RAG completato", state="complete")
+            return result
+        except Exception as e:
+            status_container.update(label=f"❌ Errore RAG: {str(e)}", state="error")
+            raise
+    
     @abstractmethod
     def rag(self):
         pass

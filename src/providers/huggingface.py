@@ -48,8 +48,13 @@ class HuggingfaceProvider(Provider):
         return ChatOpenAI(model=modello, api_key=api_key, base_url=base_url)
 
     def rag(self):
+        """
+        Configura e esegue il RAG per HuggingFace.
+        Usa il metodo centralizzato _esegui_rag_con_feedback() per il feedback visivo.
+        """
         if self._rag.get_modello():
             self._rag.set_motore_di_embedding(HuggingFaceEmbeddings(model_name=self._rag.get_modello()))
             # per hugging face i tokenizer hanno lo stesso nome del modello di embedding
             self._rag.set_tokenizer(self._rag.get_modello())
-        return self._rag.run()
+        
+        return self._esegui_rag_con_feedback()

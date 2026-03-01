@@ -25,7 +25,7 @@ class Rag():
     _pulizia_fatta = False  # esegue la pulizia solo una volta per processo
 
     def __init__(self, attivo=False, modello=None, upload_dir=None, topk=None,
-                 motore_di_embedding=None, tokenizer="", modalita_ricerca="similarity"):
+                 motore_di_embedding=None, tokenizer="", modalita_ricerca="similarity", status_callback=None):
         # Silenzia i log di sentence-transformers
         logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
         logging.getLogger("sentence_transformers.SentenceTransformer").setLevel(logging.ERROR)
@@ -38,6 +38,7 @@ class Rag():
         self.set_tokenizer(tokenizer)
         self.init_vectorstore_cache() # inizializza la cache e la directory per la persistenza dei vectorstores
         self.set_modalita_ricerca(modalita_ricerca)
+        self._status_callback = status_callback  # Callback per feedback visivo
 
     def to_dict(self):
         return {
@@ -167,6 +168,14 @@ class Rag():
 
     def set_prompt(self, prompt: Messaggio):
         self._prompt=prompt
+    
+    def _notify_status(self, message: str):
+        """Invia un messaggio di stato tramite il callback se disponibile."""
+        if self._status_callback:
+            try:
+                self._status_callback(message)
+            except Exception as e:
+                logging.warning(f"[RAG] Errore callback status: {e}")
 
     def _filtra_metadati_complessi(self, save_path, mimetype):
         clean_splits = []
@@ -424,30 +433,61 @@ class Rag():
             engine_name = type(self._motore_di_embedding).__name__
             model_name = self._modello
             chunker_sig = f"{type(self._chunker).__name__}:{getattr(self._chunker,'max_tokens',None)}:{getattr(self._chunker,'overlap',None)}"
+            
+            num_files = len(self._prompt.get_allegati())
+            self._notify_status(f"🔄 Inizio elaborazione RAG ({num_files} file)")
+            
             # inizio a scorrere gli allegati
-            for f in self._prompt.get_allegati():
+            for idx, f in enumerate(self._prompt.get_allegati(), 1):
+                self._notify_status(f"📄 File {idx}/{num_files}: {f.name}")
+                
                 save_path = os.path.join(self._upload_dir, f.name)
                 with open(save_path, "wb") as out:
                     out.write(f.getbuffer())
                     file_id=hashlib.sha256(f.getbuffer()).hexdigest()
+                
                 # Questa tupla identifica univocamente un vectorstore nella cache
                 chiave_cache = (file_id, engine_name, model_name, chunker_sig)
+                
+                # Verifica se il vectorstore è già in cache
+                key = json.dumps(chiave_cache, ensure_ascii=False)
+                if key in Rag._cache_vectorstores:
+                    self._notify_status(f"💾 Vectorstore trovato in cache")
+                elif key in Rag.get_indice():
+                    self._notify_status(f"💾 Caricamento vectorstore da disco")
+                else:
+                    self._notify_status(f"🔍 Parsing documento con Docling...")
+                
                 # Recupera il vectorstore (dalla cache se già esiste)
                 vectorstore = self._get_vectorstore(path=save_path, vectorstore_id=chiave_cache, tipo=f.type)
+                
+                # Se non era in cache, significa che è stato appena creato
+                if key not in Rag._cache_vectorstores or key not in Rag.get_indice():
+                    self._notify_status(f"🧮 Creazione embeddings (modello: {model_name})")
+                
                 # Cancella il file ORIGINARIO (non serve più)
                 try:
                     os.remove(save_path)
                 except Exception:
                     # Non blocca il flusso se non riesce a cancellare il file (lock, antivirus, etc.)
                     pass
-                # Recupera i top-k chunk più rilevanti usando di default la ricerca mmr
+                
+                # Recupera i top-k chunk più rilevanti
+                modalita_emoji = "🔎" if self._modalita_ricerca == "similarity" else "🎯"
+                self._notify_status(f"{modalita_emoji} Ricerca semantica (top-{self._topk}, modalità: {self._modalita_ricerca})")
                 top_docs=self._recupero_chunk(vectorstore=vectorstore, modo=self._modalita_ricerca)
+                
                 # Rende ciascun chunk in un code fence "text" (niente interpretazione markdown)
                 def as_code_block(s: str) -> str:
                     return f"```text\n{s}\n```"
                 risultato.append(Allegato(tipo="text", contenuto="\n\n---\n\n".join(as_code_block(doc.page_content) for doc in top_docs), mime_type="text/plain"))
+                
+                self._notify_status(f"✅ File {idx}/{num_files} completato")
+            
+            self._notify_status(f"✅ RAG completato con successo")
             return risultato
         except Exception as e:
+            self._notify_status(f"❌ Errore RAG: {str(e)}")
             raise Exception(f"Errore in fase RAG: {e}")
 
     # funzione che carica i vectorstore da file
