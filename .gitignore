@@ -9,6 +9,8 @@ config.json
 uploads/
 vectorstore_cache/
 config.db
+config.db-shm
+config.db-wal
 
 # Virtual environments
 .venv
