@@ -926,57 +926,104 @@ Per aggiungere un nuovo tool, segui questi passaggi:
 
 Consulta la [documentazione di LangChain](https://python.langchain.com/docs/integrations/tools/) per vedere i tools disponibili.
 
-Esempio: Implementiamo il tool DuckDuckGo Search.
+Esempio: Implementiamo il tool Jira.
 
 **2. Crea un nuovo file in `src/tools/`**
 
-Esempio: `src/tools/DuckDuckGo.py`
+Esempio: `src/tools/Jira.py`
 
 ```python
-from src.tools.Tool import Tool
-from langchain_community.tools import DuckDuckGoSearchRun
+"""Tool per interagire con Jira tramite LangChain Community."""
 
-class DuckDuckGoTool(Tool):
-    def __init__(self):
+from typing import Any, List
+from src.tools.Tool import Tool
+
+
+class Jira(Tool):
+    def __init__(self) -> None:
         super().__init__(
-            nome="DuckDuckGo",
-            descrizione="Cerca informazioni su DuckDuckGo",
-            icona="🦆"
+            nome="Jira",
+            pacchetti_python_necessari={
+                "langchain-community": "langchain_community",
+                "atlassian-python-api": "atlassian"
+            },
+            variabili_necessarie={
+                "JIRA_INSTANCE_URL": "",
+                "JIRA_USERNAME": "",
+                "JIRA_API_TOKEN": "",
+                "JIRA_CLOUD": "true"
+            },
+            parametri_iniziali={
+                "mode": "jql"
+            }
         )
-        # Definisci le variabili necessarie (se richieste)
-        self._variabili_necessarie = {}
-    
-    def get_tool(self):
-        """Ritorna il tool LangChain"""
-        # Crea e ritorna il tool
-        tool = DuckDuckGoSearchRun()
-        return [tool]  # Ritorna sempre una lista
-    
-    def valida_configurazione(self):
-        """Valida la configurazione del tool"""
-        # Implementa la validazione se necessario
-        return True
+        
+        # Descrizioni per i parametri nella GUI
+        self._param_descriptions = {
+            "mode": "Modalità di operazione: jql (ricerca), get_projects, create_issue, create_page, other"
+        }
+        
+        # Opzioni disponibili per mode
+        self._param_options = {
+            "mode": ["jql", "get_projects", "create_issue", "create_page", "other"]
+        }
+
+    def get_tool(self) -> List[Any]:
+        """
+        Ottiene il tool Jira configurato.
+        
+        Returns:
+            Lista contenente il tool Jira configurato
+        """
+        from langchain_community.tools.jira.tool import JiraAction
+        from langchain_community.utilities.jira import JiraAPIWrapper
+        
+        # Crea il wrapper Jira (usa le variabili d'ambiente impostate in Tool)
+        jira_wrapper = JiraAPIWrapper()
+        
+        # Ottieni la modalità dall'attributo dell'istanza
+        mode = self.mode
+        
+        # Crea il tool con la modalità specificata
+        tool = JiraAction(
+            api_wrapper=jira_wrapper,
+            mode=mode
+        )
+        
+        return [tool]
 ```
 
 **3. Aggiungi dipendenze se necessarie**
 
-Se il tool richiede dipendenze aggiuntive, aggiungile a `pyproject.toml`:
+Se il tool richiede dipendenze aggiuntive, aggiungile con `uv`:
 
 ```bash
-uv add duckduckgo-search
+uv add langchain-community atlassian-python-api
 ```
 
 **4. Il tool verrà caricato automaticamente**
 
 Il `Loader` in `src/tools/loader.py` scopre automaticamente tutti i tools nella directory `src/tools/`.
 
-**5. Testa il nuovo tool**
+**5. Configura le variabili d'ambiente**
 
-1. Avvia DAPABot
-2. Apri "🛠️ Configura Tools"
-3. Attiva il nuovo tool "DuckDuckGo"
-4. Attiva la modalità agentica
-5. Fai una domanda che richiede una ricerca web
+Prima di usare il tool Jira, configura le variabili necessarie:
+
+1. Apri "🛠️ Configura Tools"
+2. Seleziona il tool "Jira"
+3. Compila i campi richiesti:
+   - `JIRA_INSTANCE_URL`: URL della tua istanza Jira (es: `https://tuaazienda.atlassian.net`)
+   - `JIRA_USERNAME`: Il tuo username Jira
+   - `JIRA_API_TOKEN`: Il tuo API token Jira
+   - `JIRA_CLOUD`: `true` per Jira Cloud, `false` per Jira Server
+4. Seleziona la modalità desiderata (es: `jql` per ricerche)
+5. Salva la configurazione
+
+**6. Testa il nuovo tool**
+
+1. Attiva il tool "Jira" nella lista dei tools attivi
+2. Attiva la modalità agentica
+3. Fai una domanda che richiede l'accesso a Jira (es: "Mostrami i ticket aperti nel progetto XYZ")
 
 **Esempio di tool con configurazione**:
 

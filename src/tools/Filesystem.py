@@ -12,9 +12,36 @@ class Filesystem(Tool):
             },
             parametri_iniziali={
                 "root_dir": "",
-                "selected_tools": [tool.name for tool in FileManagementToolkit().get_tools()]
+                "selected_tools": [
+                    "copy_file",
+                    "file_delete",
+                    "file_search",
+                    "move_file",
+                    "read_file",
+                    "write_file",
+                    "list_directory"
+                ]
             }
         )
+        
+        # Descrizioni per i parametri nella GUI
+        self._param_descriptions = {
+            "root_dir": "Directory radice per le operazioni sui file (lasciare vuoto per usare la directory corrente)",
+            "selected_tools": "Lista dei tool da abilitare (seleziona uno o più tool)"
+        }
+        
+        # Opzioni disponibili per selected_tools (nomi corretti da FileManagementToolkit)
+        self._param_options = {
+            "selected_tools": [
+                "copy_file",
+                "file_delete",
+                "file_search",
+                "move_file",
+                "read_file",
+                "write_file",
+                "list_directory"
+            ]
+        }
 
     def get_tool(self):
         return FileManagementToolkit(root_dir=self.root_dir, selected_tools=self.selected_tools).get_tools()

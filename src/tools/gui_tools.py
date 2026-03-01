@@ -157,16 +157,62 @@ def mostra_dialog_tools_agent():
                     # Form dinamico basato sui parametri
                     config_temp = st.session_state["tool_config_temp"]
                     
+                    # Ottieni le opzioni dei parametri se disponibili
+                    param_options = getattr(tool_instance, '_param_options', {})
+                    param_descriptions = getattr(tool_instance, '_param_descriptions', {})
+                    
                     for param_name, param_value in configurable_params.items():
                         # Valore corrente (da config temp o dal tool)
                         current_value = config_temp.get(param_name, param_value)
                         
+                        # Help text per il parametro
+                        help_text = param_descriptions.get(param_name, None)
+                        
+                        # Se il parametro ha opzioni specifiche
+                        if param_name in param_options:
+                            options = param_options[param_name]
+                            
+                            # Se il valore di default è una lista, usa multiselect
+                            if isinstance(param_value, list):
+                                # Assicurati che current_value sia una lista
+                                if not isinstance(current_value, list):
+                                    current_value = [current_value] if current_value else []
+                                
+                                # Filtra solo i valori validi che sono nelle opzioni
+                                default_values = [v for v in current_value if v in options]
+                                
+                                value = st.multiselect(
+                                    param_name,
+                                    options=options,
+                                    default=default_values,
+                                    key=f"param_{selected_tool}_{param_name}",
+                                    help=help_text
+                                )
+                                config_temp[param_name] = value
+                            else:
+                                # Altrimenti usa selectbox per valori singoli
+                                # Trova l'indice del valore corrente
+                                try:
+                                    index = options.index(current_value) if current_value in options else 0
+                                except (ValueError, TypeError):
+                                    index = 0
+                                
+                                value = st.selectbox(
+                                    param_name,
+                                    options=options,
+                                    index=index,
+                                    key=f"param_{selected_tool}_{param_name}",
+                                    help=help_text
+                                )
+                                config_temp[param_name] = value
+                        
                         # Crea il widget appropriato in base al tipo
-                        if isinstance(param_value, bool):
+                        elif isinstance(param_value, bool):
                             value = st.checkbox(
                                 param_name,
                                 value=bool(current_value),
-                                key=f"param_{selected_tool}_{param_name}"
+                                key=f"param_{selected_tool}_{param_name}",
+                                help=help_text
                             )
                             config_temp[param_name] = value
                         
@@ -174,7 +220,8 @@ def mostra_dialog_tools_agent():
                             value = st.number_input(
                                 param_name,
                                 value=int(current_value) if current_value is not None else 0,
-                                key=f"param_{selected_tool}_{param_name}"
+                                key=f"param_{selected_tool}_{param_name}",
+                                help=help_text
                             )
                             config_temp[param_name] = value
                         
@@ -183,7 +230,8 @@ def mostra_dialog_tools_agent():
                                 param_name,
                                 value=float(current_value) if current_value is not None else 0.0,
                                 key=f"param_{selected_tool}_{param_name}",
-                                format="%.2f"
+                                format="%.2f",
+                                help=help_text
                             )
                             config_temp[param_name] = value
                         
@@ -193,7 +241,7 @@ def mostra_dialog_tools_agent():
                             value = st.text_area(
                                 param_name,
                                 value=list_value,
-                                help="Valori separati da virgola",
+                                help=help_text or "Valori separati da virgola",
                                 key=f"param_{selected_tool}_{param_name}",
                                 height=100
                             )
@@ -205,7 +253,8 @@ def mostra_dialog_tools_agent():
                             value = st.text_input(
                                 param_name,
                                 value=str(current_value) if current_value is not None else "",
-                                key=f"param_{selected_tool}_{param_name}"
+                                key=f"param_{selected_tool}_{param_name}",
+                                help=help_text
                             )
                             config_temp[param_name] = value
                     

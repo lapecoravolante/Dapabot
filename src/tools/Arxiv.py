@@ -20,6 +20,16 @@ class Arxiv(Tool):
                 "doc_content_chars_max": 4000
             }
         )
+        
+        # Descrizioni per i parametri nella GUI
+        self._param_descriptions = {
+            "top_k_results": "Numero di risultati top-scored da restituire",
+            "ARXIV_MAX_QUERY_LENGTH": "Lunghezza massima della query (caratteri)",
+            "continue_on_failure": "Se True, continua il caricamento anche in caso di errori",
+            "load_max_docs": "Numero massimo di documenti da caricare",
+            "load_all_available_meta": "Se True, carica tutti i metadati disponibili; se False, solo data, titolo, autori e sommario",
+            "doc_content_chars_max": "Lunghezza massima del contenuto del documento (caratteri)"
+        }
 
     def get_tool(self):
         # Crea il wrapper Arxiv con i parametri configurati
