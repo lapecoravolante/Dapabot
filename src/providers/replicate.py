@@ -407,15 +407,20 @@ class ReplicateProvider(Provider):
         )
 
     def rag(self):
+        """
+        Configura e esegue il RAG per Replicate.
+        Usa il metodo centralizzato _esegui_rag_con_feedback() per il feedback visivo.
+        """
         if self._rag.get_modello():
             self._rag.set_motore_di_embedding(
                 OpenAIEmbeddings(
-                    model=self._rag.get_modello(), 
-                    base_url=self._base_url, 
+                    model=self._rag.get_modello(),
+                    base_url=self._base_url,
                     api_key=self._api_key
                 )
             )
             self._rag.set_tokenizer(tokenizer="gpt2", max_tokens=1000, overlap=150)
-        return self._rag.run()
+        
+        return self._esegui_rag_con_feedback()
 
 # Made with Bob

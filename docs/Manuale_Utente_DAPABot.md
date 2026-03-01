@@ -287,6 +287,10 @@ L'interfaccia di DAPABot è divisa in due aree principali:
 
 #### Componenti della Sidebar
 
+![Interfaccia Principale](images/01_interfaccia_principale.png)
+
+*Figura 1: Interfaccia principale di DAPABot con sidebar e area conversazione*
+
 La sidebar contiene i seguenti elementi:
 
 1. **Selezione Provider**: Tab per scegliere tra i provider disponibili (HuggingFace, OpenRouter, Replicate)
@@ -336,22 +340,30 @@ Il modello risponderà descrivendo le sue capacità e come può aiutarti.
 
 ### 3.1 Gestione Chat
 
-L'expander "💬 Gestione chat" permette di gestire le conversazioni salvate.
+L'expander "💬 Gestione chat" permette di gestire le conversazioni.
+
+![Gestione Chat](images/02_gestione_chat.png)
+
+*Figura 2: Expander Gestione Chat con opzioni di salvataggio, import/export ed eliminazione*
 
 #### Funzionalità disponibili
 
 ##### Salvare una conversazione
 
 1. Apri l'expander "💬 Gestione chat"
-2. La conversazione corrente viene salvata automaticamente nel database
-3. Ogni messaggio è associato al provider e al modello utilizzato
+2. Clicca su "Salva chat corrente"
+3. La conversazione corrente viene salvata automaticamente nel database
+Per salvare tutte le chat avviate nella sessione di lavoro scegliere la voce "Salva tutte le chat" al passo 2.
 
-##### Caricare una conversazione precedente
+##### Caricare una conversazione precedente dal DB
+All'avvio dell'applicazione le chat salvate su DB non vengono caricate in automatico. Per farlo:
 
 1. Apri l'expander "💬 Gestione chat"
 2. Attiva il checkbox "📖 Visualizza chat dal DB"
 3. Seleziona la conversazione desiderata dal menu a tendina
 4. La conversazione verrà caricata nell'area principale
+
+Per evitare di scegliere la chat dal menu a tendina è possibile selezionare la checkbox "Autocaricamento dal DB" e da questo momento in poi le chat salvate su DB verranno caricate automaticamente.
 
 ##### Eliminare una conversazione
 
@@ -361,13 +373,11 @@ L'expander "💬 Gestione chat" permette di gestire le conversazioni salvate.
 
 **Attenzione**: L'eliminazione è permanente e non può essere annullata.
 
+La schermata offre più opzioni per l'eliminazione delle chat (anche su DB). Ognuna è accompagnata da un messaggio di aiuto contestuale.
+
 ##### Esportare una conversazione
 
-DAPABot permette di esportare le conversazioni in diversi formati:
-
-1. **Esporta in JSON**: Salva la conversazione in formato JSON strutturato
-2. **Esporta in Markdown**: Crea un file Markdown leggibile
-3. **Esporta in TXT**: Salva come testo semplice
+DAPABot permette di esportare le conversazioni presenti su DB in formato JSON. Tale formato è usato anche per l'importazione.
 
 **Esempio di file JSON esportato**:
 
@@ -391,33 +401,19 @@ DAPABot permette di esportare le conversazioni in diversi formati:
 }
 ```
 
-**Esempio di file Markdown esportato**:
-
-```markdown
-# Conversazione con DeepSeek-V3
-**Provider**: HuggingFace  
-**Data**: 28/02/2026 16:30
-
----
-
-## 👤 Utente
-Ciao! Come stai?
-
-## 🤖 Assistente
-Ciao! Sono un'intelligenza artificiale, quindi non ho stati d'animo, ma sono qui per aiutarti!
-```
-
 ##### Importare una conversazione
 
 Per importare una conversazione precedentemente esportata:
 
-1. Clicca sul pulsante "📥 Importa chat"
-2. Seleziona il file JSON da importare
-3. La conversazione verrà caricata nel database e visualizzata
-
-**Nota**: Solo i file JSON esportati da DAPABot possono essere importati.
+1. Clicca sul pulsante "📥 Seleziona JSON da importare"
+2. Seleziona il file JSON
+3. Conferma l'ìmportazione cliccando sul pulsante "📥 Importa Chat"
+4. La conversazione verrà caricata nel database
 
 ##### Ripulire la chat corrente
+
+La pulizia della chat è usata per azzerare i messaggi nella cronologia del modello e ripartire da zero.
+I messaggi salvati su DB restano inalterati e disponibili per un recupero successivo.
 
 Per iniziare una nuova conversazione:
 
@@ -427,9 +423,9 @@ Per iniziare una nuova conversazione:
 
 ### 3.2 RAG (Retrieval Augmented Generation)
 
-Il RAG (Retrieval Augmented Generation) è una tecnica che permette di arricchire le risposte del modello con informazioni estratte da documenti caricati dall'utente.
-
 #### Cos'è il RAG?
+
+Il RAG (Generazione Aumentata dal Recupero) è una tecnica che permette di arricchire le risposte del modello con informazioni estratte da documenti caricati dall'utente.
 
 Il RAG funziona in tre fasi:
 
@@ -443,24 +439,28 @@ Il RAG funziona in tre fasi:
 2. Attiva il checkbox "Abilita RAG"
 3. Configura i parametri:
    - **Modello di embedding**: Seleziona il modello per creare i vettori (default: `sentence-transformers/all-MiniLM-L6-v2`)
-   - **Top K**: Numero di chunk da recuperare (default: 5)
-   - **Modalità di ricerca**: Scegli tra "similarity" (similarità) o "mmr" (Maximum Marginal Relevance)
+   - **Top K**: Numero di chunk da recuperare (default: 3)
+   - **Modalità di ricerca**: Scegli tra "similarity" (similarità) o "mmr" (Maximum Marginal Relevance). Nel primo caso verranno recuperati i chunk più simili al prompt dell'utente, nel secondo caso verranno recuperati i chunk con massima rilevanza marginale, cioè che aggiungono ulteriori informazioni rispetto a quelli già recuperati.
 
 #### Caricare documenti
 
-DAPABot supporta diversi formati di documento:
+Per il RAG, DAPABot supporta tutti i formati di documento supportati da Docling::
 
 - **PDF**: Documenti PDF con testo e immagini
 - **DOCX**: Documenti Microsoft Word
 - **TXT**: File di testo semplice
 - **Immagini**: PNG, JPG (con OCR)
+- **molti altri...**
+
+Nota: i documenti in testo semplice non vengono divisi in chunk ma sono caricati per intero.
 
 **Procedura**:
 
-1. Clicca sul pulsante "📄 Carica documenti"
+1. Clicca sul pulsante "+" vicino il campo per l'inserimento del prompt
 2. Seleziona uno o più file dal tuo computer
-3. Attendi che i documenti vengano elaborati e indicizzati
-4. I documenti saranno disponibili per le ricerche
+3. Scrivi il messaggio per il modello e invia
+
+I documenti vengono elaborati ed aggiunti al prompt preceduti dalla frase: "Rispondi dando priorità al contesto fornito di seguito". In questo modo il modello risponderà basandosi principalmente sui pezzi recuperati con il RAG.
 
 #### Esempio pratico: Caricare un PDF e fare domande
 
@@ -469,12 +469,12 @@ DAPABot supporta diversi formati di documento:
 1. **Carica il PDF**:
    - Apri l'expander "🔍 RAG"
    - Attiva "Abilita RAG"
-   - Clicca su "📄 Carica documenti"
+   - Clicca su "+"
    - Seleziona il file PDF
+   - Scrivi ed invia il prompt con il file allegato
 
 2. **Attendi l'indicizzazione**:
    - DAPABot elaborerà il documento
-   - Verrà mostrato un messaggio di conferma
 
 3. **Fai una domanda**:
    ```
@@ -488,18 +488,26 @@ DAPABot supporta diversi formati di documento:
 
 #### Gestire i documenti caricati
 
+Cliccando sul pulsante "Cache" si può accedere alla sezione che elenca i file già caricati e indicizzati per il RAG. Da questa finestra si possono:
+
 - **Visualizzare i documenti**: La lista dei documenti caricati è visibile nell'expander RAG
 - **Eliminare documenti**: Clicca sull'icona del cestino accanto al documento da rimuovere
-- **Svuotare il database**: Clicca su "🗑️ Svuota database RAG" per eliminare tutti i documenti
+- **Svuotare il database**: Clicca su "Elimina tutto" per eliminare tutti i documenti
+
+![Cache VectorStore](images/07_cache_vectorstore.png)
 
 ### 3.3 Modalità Agentica
 
-La modalità agentica permette ai modelli di utilizzare strumenti esterni (tools) per eseguire azioni e ottenere informazioni.
+La modalità agentica permette ai modelli di utilizzare risorse, prompt e strumenti esterni (tools) per eseguire azioni e ottenere informazioni.
+
+![Modalità Agentica](images/04_modalita_agentica.png)
+
+*Figura 3: Expander Modalità Agentica con opzioni per tools e server MCP*
 
 #### Cos'è un agente?
 
-Un **agente** è un modello di linguaggio che può:
-- Decidere autonomamente quali strumenti utilizzare
+Un **agente** è un'entità che, usando un modello di IA, può:
+- Decidere quali strumenti utilizzare
 - Eseguire azioni in base al contesto
 - Combinare i risultati di più strumenti
 - Ragionare sui risultati ottenuti
@@ -529,19 +537,26 @@ DAPABot include diversi tools nativi basati su LangChain.
 2. **arXiv**: Cerca articoli scientifici su arXiv
 3. **GitHub**: Interagisce con repository GitHub
 4. **Filesystem**: Legge e scrive file sul sistema
+5. **altri in arrivo con le prossime versioni...**
 
 #### Configurare i tools
 
+![Configurazione Tools](images/05_tools_config.png)
+
+*Figura 4: Finestra di configurazione dei tools con lista dei tools disponibili*
+
 1. Apri l'expander "🤖 Modalità Agentica"
-2. Clicca su "🛠️ Configura Tools"
+2. Clicca su "⚙️ Configura Tools"
 3. Si aprirà una finestra di dialogo con la lista dei tools disponibili
+4. Seleziona il tools che vuoi configurare cliccando sul suo nome
+5. Se il tool richiede configurazione (es. API key), compila i campi necessari
+6. Clicca su "Salva" per confermare
 
 #### Attivare un tool
 
-1. Nella finestra di configurazione, trova il tool desiderato
-2. Attiva il checkbox accanto al nome del tool
-3. Se il tool richiede configurazione (es. API key), compila i campi necessari
-4. Clicca su "Salva" per confermare
+1. Nella finestra di configurazione, clicca sulla multiselect in fondo
+2. Scegli i tools che vuoi attivare
+3. Chiudi la finestra di dialogo
 
 #### Esempio: Usare il tool Wikipedia
 
@@ -549,8 +564,8 @@ DAPABot include diversi tools nativi basati su LangChain.
 
 1. **Attiva il tool**:
    - Apri "🛠️ Configura Tools"
-   - Attiva "Wikipedia"
-   - Salva la configurazione
+   - Aggiungi "Wikipedia" alla multiselect in fondo
+   - Chiudi la finestra di dialogo
 
 2. **Attiva la modalità agentica**:
    - Nell'expander "🤖 Modalità Agentica"
@@ -600,10 +615,14 @@ MCP è un protocollo standard per:
 
 Un server MCP locale è un processo che gira sulla stessa macchina di DAPABot.
 
+![Configurazione MCP](images/06_mcp_config.png)
+
+*Figura 5: Finestra di configurazione dei server MCP con form per aggiungere server locali e remoti*
+
 **Esempio: Server filesystem locale**
 
 1. Apri l'expander "🤖 Modalità Agentica"
-2. Clicca su "⚙️ Configura MCP"
+2. Clicca su "🔌 Configura MCP"
 3. Clicca su "➕ Aggiungi Server"
 4. Compila i campi:
    - **Nome**: `filesystem-local`
@@ -630,35 +649,31 @@ Un server MCP remoto è un servizio accessibile via rete.
 
 4. Clicca su "Salva"
 
-#### Testare la connessione
-
-Dopo aver configurato un server:
-
-1. Clicca sul pulsante "🔌 Testa connessione" accanto al server
-2. DAPABot tenterà di connettersi
-3. Verrà mostrato un messaggio di successo o errore
-
 ### 3.3.3 Esplora Server MCP
 
-La finestra "Esplora Server MCP" permette di visualizzare cosa offre ogni server configurato.
+La finestra "MCP Discovery - Preview Server" permette di visualizzare cosa offre ogni server configurato.
+
+![MCP Discovery](images/08_mcp_discovery.png)
+
+*Figura 6: Finestra di esplorazione dei server MCP*
 
 #### Aprire la finestra di esplorazione
 
 1. Apri l'expander "🤖 Modalità Agentica"
-2. Clicca su "🔍 Esplora Server MCP"
+2. Clicca su "🔍 MCP Discovery"
 3. Si aprirà una finestra di dialogo
 
 #### Cosa puoi vedere
 
 Per ogni server MCP configurato, puoi visualizzare:
 
-1. **Tools disponibili**:
+1. **Strumenti disponibili**:
    - Nome del tool
    - Descrizione
    - Parametri richiesti
    - Esempi di utilizzo
 
-2. **Resources disponibili**:
+2. **Risorse disponibili**:
    - URI della risorsa
    - Tipo di contenuto
    - Descrizione
@@ -673,7 +688,7 @@ Per ogni server MCP configurato, puoi visualizzare:
 
 **Scenario**: Hai configurato un server MCP per GitHub e vuoi vedere cosa offre.
 
-1. Apri "🔍 Esplora Server MCP"
+1. Apri "🔍 MCP Discovery"
 2. Seleziona il server "github-mcp"
 3. Visualizzi:
    - **Tools**: `search_repositories`, `get_file_contents`, `create_issue`

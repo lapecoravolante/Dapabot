@@ -388,7 +388,11 @@ def mostra_dialog_vectorestores_globale():
 # ──────────────────────────────────────────────────────────────────────────────
 # Manuale Utente
 # ──────────────────────────────────────────────────────────────────────────────
-@st.dialog("📖 Manuale Utente DAPABot", width="large")
+def _on_close_manuale_dialog():
+    """Callback chiamata quando il dialog del manuale viene chiuso."""
+    st.session_state["manuale_dialog_open"] = False
+
+@st.dialog("📖 Manuale Utente DAPABot", width="large", on_dismiss=_on_close_manuale_dialog)
 def mostra_manuale():
     """Mostra il manuale utente in un dialog con scrollbar."""
     manual_path = Path(__file__).parent.parent / "docs" / "Manuale_Utente_DAPABot.md"
@@ -412,7 +416,7 @@ def mostra_manuale():
                         img_path = match.group(1)
                         full_img_path = images_dir / img_path.replace('images/', '')
                         if full_img_path.exists():
-                            st.image(str(full_img_path), use_container_width=True)
+                            st.image(str(full_img_path), width='stretch')
                 else:
                     # Altrimenti è testo markdown
                     if section.strip():

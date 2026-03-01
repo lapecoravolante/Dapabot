@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# Disabilita la telemetria di mcp-use
+import os
+os.environ["MCP_USE_ANONYMIZED_TELEMETRY"] = "false"
+
 import streamlit as st
 from datetime import datetime
 import subprocess
