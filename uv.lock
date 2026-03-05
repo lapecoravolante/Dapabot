@@ -605,6 +605,7 @@ name = "dapabot"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "beautifulsoup4" },
     { name = "docling" },
     { name = "duckduckgo-search" },
     { name = "extra-streamlit-components" },
@@ -633,6 +634,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.14.3" },
     { name = "docling", specifier = ">=2.63.0" },
     { name = "duckduckgo-search", specifier = ">=8.1.1" },
     { name = "extra-streamlit-components", specifier = ">=0.1.81" },

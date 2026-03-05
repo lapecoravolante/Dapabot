@@ -47,4 +47,5 @@ dependencies = [
     "uv>=0.10.2",
     "validators>=0.35.0",
     "fastmcp>=3.0.0",
+    "beautifulsoup4>=4.14.3",
 ]

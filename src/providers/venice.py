@@ -5,11 +5,37 @@ import requests
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import re
+import subprocess
+import sys
 
 class VeniceProvider(Provider):
     
     def __init__(self, nome="Venice", prefisso_token="VENICE_", base_url="https://api.venice.ai/api/v1"):
         super().__init__(nome=nome, prefisso_token=prefisso_token, base_url=base_url)
+
+    def _ensure_chromium_installed(self):
+        """
+        Verifica se Chromium è installato per Playwright e lo installa automaticamente se necessario.
+        Questo metodo viene chiamato prima di usare Playwright per evitare errori.
+        """
+        try:
+            # Prova a lanciare chromium per verificare se è installato
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                browser.close()
+        except Exception:
+            # Chromium non è installato, installalo automaticamente
+            try:
+                print("Installazione di Chromium per Playwright in corso...")
+                subprocess.run(
+                    [sys.executable, "-m", "playwright", "install", "chromium"],
+                    check=True,
+                    capture_output=True
+                )
+                print("Chromium installato con successo!")
+            except subprocess.CalledProcessError as e:
+                print(f"Errore durante l'installazione di Chromium: {e}")
+                raise
 
     def _query(self, url):
         try:
@@ -43,6 +69,9 @@ class VeniceProvider(Provider):
             return self._modelli_rag
         
         try:
+            # Assicurati che Chromium sia installato
+            self._ensure_chromium_installed()
+            
             modelli = []
             url = "https://docs.venice.ai/models/embeddings"
             
