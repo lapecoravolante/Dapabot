@@ -1,6 +1,6 @@
 """Tool per interagire con GitLab tramite LangChain Community."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 from src.tools.Tool import Tool
 
 
@@ -58,7 +58,7 @@ class Gitlab(Tool):
             ]
         }
 
-    def get_tool(self) -> List[Any]:
+    def get_tool(self) -> list[Any]:
         """
         Ottiene i tool GitLab configurati.
         

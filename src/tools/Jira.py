@@ -1,9 +1,8 @@
 """Tool per interagire con Jira tramite LangChain."""
 
 import os
-from typing import Any, List
+from typing import Any
 from src.tools.Tool import Tool
-
 
 class Jira(Tool):
     """
@@ -36,7 +35,7 @@ class Jira(Tool):
             "jira_cloud": "Usa Jira Cloud (attivo) o Jira Server/Data Center (disattivo)"
         }
 
-    def get_tool(self) -> List[Any]:
+    def get_tool(self) -> list[Any]:
         """
         Crea e ritorna i tool per interagire con Jira.
         Usa JiraToolkit di LangChain con patch per bug priority=None.
@@ -128,20 +127,34 @@ class Jira(Tool):
         for tool in toolkit.get_tools():
             if tool.name == "jql_query":
                 tool.name = "jira_jql_query"
-                tool.description = """Cerca issue Jira usando JQL.
+                tool.description = """Search Jira issues using JQL (Jira Query Language).
 
-ESEMPI OBBLIGATORI (copia questi esattamente):
-- project = KAN
-- project = KAN AND status = \"To Do\"
-- project = KAN ORDER BY created DESC
+WARNING: You must provide a VALID JQL query, not a natural language phrase!
 
-REGOLE:
-1. Usa SEMPRE un operatore JQL valido: =, !=, <, >, <=, >=, IN, NOT IN, IS, IS NOT
-2. NON usare mai parole come 'tutte', 'all', 'nessuna'
-3. Il nome del progetto deve essere la chiave (es: KAN, PROJ, ecc.)
-4. Metti stringhe tra virgolette: status = \"To Do\"
+CORRECT QUERY EXAMPLES (copy these patterns exactly):
+✓ project = KAN
+✓ project = KAN AND status = "To Do"
+✓ project = KAN ORDER BY created DESC
+✓ assignee = currentUser()
+✓ status IN ("To Do", "In Progress")
 
-Se non sai le chiavi dei progetti, chiama prima jira_get_projects."""
+WRONG QUERY EXAMPLES (NEVER use these patterns):
+✗ project all issues (WRONG - "all" is not a JQL operator)
+✗ project = KAN LIMIT 10 (WRONG - LIMIT is not supported in JQL)
+✗ show all issues (WRONG - not a JQL query)
+✗ project KAN (WRONG - missing = operator)
+✗ get all issues from KAN (WRONG - not JQL syntax)
+
+MANDATORY RULES:
+1. Use ONLY these operators: =, !=, <, >, <=, >=, ~, !~, IN, NOT IN, IS, IS NOT
+2. NEVER use natural language words like "all", "show", "list", "get", "tutte", "mostra"
+3. Project key must follow the = operator (e.g., project = KAN)
+4. Strings with spaces need quotes: status = "To Do"
+5. To sort: ORDER BY field ASC/DESC
+6. To filter: use AND, OR, NOT
+
+IMPORTANT: If you don't know the project key, call jira_get_projects first.
+To get all issues from a project, simply use: project = KEY"""
             elif tool.name == "get_projects":
                 tool.name = "jira_get_projects"
                 tool.description = "Restituisce tutti i progetti Jira a cui l'utente ha accesso."

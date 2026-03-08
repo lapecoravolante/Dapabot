@@ -1,6 +1,6 @@
 """Tool per interagire con database SQL tramite LangChain."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 from src.tools.Tool import Tool
 
 
@@ -52,7 +52,7 @@ class SqlDatabase(Tool):
         # Memorizza l'istanza del database
         self._db_instance = None
 
-    def get_tool(self) -> List[Any]:
+    def get_tool(self) -> list[Any]:
         """
         Crea e ritorna i tool per interagire col database SQL.
         
@@ -93,7 +93,7 @@ class SqlDatabase(Tool):
         # Crea i tool manualmente (funziona con o senza LLM)
         return self._create_tools_without_llm()
     
-    def _create_tools_without_llm(self) -> List[Any]:
+    def _create_tools_without_llm(self) -> list[Any]:
         """
         Crea i tool per interagire col database senza LLM.
         
@@ -146,7 +146,7 @@ class SqlDatabase(Tool):
         
         return tools
     
-    def get_database_info(self) -> Dict[str, Any]:
+    def get_database_info(self) -> dict[str, Any]:
         """
         Ottiene informazioni sul database connesso.
         

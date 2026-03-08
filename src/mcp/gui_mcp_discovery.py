@@ -5,7 +5,7 @@ Implementa un dialog con tabs per esplorare cosa offre ogni server MCP prima di 
 
 import streamlit as st
 import asyncio
-from typing import Dict, List, Any, Optional
+from typing import Any, Optional
 from src.mcp.client import get_mcp_client_manager
 from src.ConfigurazioneDB import ConfigurazioneDB
 
@@ -33,7 +33,7 @@ def _init_discovery_state():
 # Funzioni di ricerca
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _search_tools(tools: List[Any], query: str) -> List[Any]:
+def _search_tools(tools: list[Any], query: str) -> list[Any]:
     """Filtra i tools in base alla query di ricerca"""
     if not query:
         return tools
@@ -63,7 +63,7 @@ def _on_server_change():
     st.session_state.mcp_search_query = ""
 
 
-def _render_server_list(servers: List[str], preselected: Optional[str] = None) -> Optional[str]:
+def _render_server_list(servers: list[str], preselected: Optional[str] = None) -> Optional[str]:
     """Renderizza la lista dei server MCP"""
     if not servers:
         st.info("Nessun server MCP configurato")
@@ -130,7 +130,7 @@ def _render_tool_item(tool: Any, index: int, tool_type: str):
                 st.caption("Schema argomenti non disponibile")
 
 
-def _render_tools_tab(tools: List[Any], server_name: str):
+def _render_tools_tab(tools: list[Any], server_name: str):
     """Renderizza il tab dei tools"""
     st.subheader("🔧 Tools")
     
@@ -160,7 +160,7 @@ def _render_tools_tab(tools: List[Any], server_name: str):
                 _render_tool_item(tool, idx, 'tool')
 
 
-def _render_resources_tab(resources: List[Any], server_name: str):
+def _render_resources_tab(resources: list[Any], server_name: str):
     """Renderizza il tab delle risorse"""
     st.subheader("📄 Risorse")
     
@@ -191,7 +191,7 @@ def _render_resources_tab(resources: List[Any], server_name: str):
                 _render_tool_item(resource, idx, 'resource')
 
 
-def _render_prompts_tab(prompts: List[Any], server_name: str):
+def _render_prompts_tab(prompts: list[Any], server_name: str):
     """Renderizza il tab dei prompt"""
     st.subheader("💬 Prompt")
     
@@ -248,7 +248,7 @@ def _render_summary_info(tools_count: int, resources_count: int, prompts_count: 
         )
 
 
-async def _load_preview_data(server_name: str) -> Dict[str, List[Any]]:
+async def _load_preview_data(server_name: str) -> dict[str, list[Any]]:
     """
     Carica i dati di preview per un server specifico.
     Crea un client MCP dedicato solo per questo server.
@@ -418,12 +418,12 @@ def mostra_quick_access_button():
 
 
 # Funzioni di compatibilità (mantenute per non rompere codice esistente)
-def get_selected_mcp_resources() -> List[Dict[str, Any]]:
+def get_selected_mcp_resources() -> list[dict[str, Any]]:
     """Funzione di compatibilità - ritorna lista vuota"""
     return []
 
 
-def get_selected_mcp_prompt() -> Optional[Dict[str, Any]]:
+def get_selected_mcp_prompt() -> Optional[dict[str, Any]]:
     """Funzione di compatibilità - ritorna None"""
     return None
 

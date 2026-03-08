@@ -3,7 +3,7 @@ Client MCP unificato usando mcp-use per tools, risorse e prompt.
 Sostituisce completamente langchain-mcp-adapters e l'SDK nativo MCP.
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, Optional
 import asyncio
 import threading
 import hashlib
@@ -48,8 +48,8 @@ class MCPClientManager:
         """Inizializza il manager"""
         self._client: Optional[MCPClient] = None
         self._adapter: Optional[MCPLangChainAdapter] = None
-        self._server_configs: Dict[str, Dict[str, Any]] = {}
-        self._all_tools_cache: List[BaseTool] = []
+        self._server_configs: dict[str, dict[str, Any]] = {}
+        self._all_tools_cache: list[BaseTool] = []
         self._config_hash: Optional[str] = None
         # Stato del riavvio in background
         self._restart_in_progress: bool = False
@@ -149,7 +149,7 @@ class MCPClientManager:
             self._adapter = MCPLangChainAdapter()
         return self._adapter
     
-    async def get_all_as_langchain_tools(self) -> Tuple[List[BaseTool], List[str]]:
+    async def get_all_as_langchain_tools(self) -> tuple[list[BaseTool], list[str]]:
         """
         Ottiene tutti i tools, risorse e prompt dai server MCP configurati
         come lista unificata di tools LangChain.
@@ -192,7 +192,7 @@ class MCPClientManager:
         # Ritorna tools ed errori separatamente
         return all_tools, errors
     
-    async def get_tools_only(self) -> List[BaseTool]:
+    async def get_tools_only(self) -> list[BaseTool]:
         """
         Ottiene solo i tools (esclude risorse e prompt).
         
@@ -204,7 +204,7 @@ class MCPClientManager:
         await adapter.create_tools(client)
         return adapter.tools
     
-    async def get_resources_only(self) -> List[BaseTool]:
+    async def get_resources_only(self) -> list[BaseTool]:
         """
         Ottiene solo le risorse (come tools LangChain).
         
@@ -216,7 +216,7 @@ class MCPClientManager:
         await adapter.create_resources(client)
         return adapter.resources
     
-    async def get_prompts_only(self) -> List[BaseTool]:
+    async def get_prompts_only(self) -> list[BaseTool]:
         """
         Ottiene solo i prompt (come tools LangChain).
         
@@ -228,7 +228,7 @@ class MCPClientManager:
         await adapter.create_prompts(client)
         return adapter.prompts
     
-    async def get_preview_info(self) -> Dict[str, Dict[str, int]]:
+    async def get_preview_info(self) -> dict[str, dict[str, int]]:
         """
         Ottiene informazioni di preview su tools, risorse e prompt
         per ogni server configurato.
@@ -309,7 +309,7 @@ class MCPClientManager:
         """
         return self._restart_in_progress
     
-    def get_server_names(self) -> List[str]:
+    def get_server_names(self) -> list[str]:
         """
         Ottiene i nomi di tutti i server configurati.
         

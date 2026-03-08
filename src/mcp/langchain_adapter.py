@@ -3,7 +3,7 @@ Adapter per integrare mcp-use con LangChain.
 Mantiene i tools MCP in formato asincrono nativo per supportare streaming in tempo reale.
 """
 
-from typing import List, Optional
+from typing import Optional
 from langchain_core.tools import BaseTool
 from mcp_use import MCPClient
 from mcp_use.agents.adapters import LangChainAdapter as MCPUseLangChainAdapter
@@ -18,7 +18,7 @@ class MCPLangChainAdapter:
     Mantiene i tools in formato asincrono nativo per supportare streaming.
     """
     
-    def __init__(self, disallowed_tools: Optional[List[str]] = None):
+    def __init__(self, disallowed_tools: Optional[list[str]] = None):
         """
         Inizializza l'adapter.
         
@@ -26,10 +26,10 @@ class MCPLangChainAdapter:
             disallowed_tools: Lista di nomi di tools/risorse/prompt da escludere
         """
         self._adapter = MCPUseLangChainAdapter(disallowed_tools=disallowed_tools or [])
-        self._tools: List[BaseTool] = []
-        self._resources: List[BaseTool] = []
-        self._prompts: List[BaseTool] = []
-        self._all_tools: List[BaseTool] = []
+        self._tools: list[BaseTool] = []
+        self._resources: list[BaseTool] = []
+        self._prompts: list[BaseTool] = []
+        self._all_tools: list[BaseTool] = []
     
     async def create_all(self, client: MCPClient) -> None:
         """
@@ -80,22 +80,22 @@ class MCPLangChainAdapter:
         self._prompts = self._adapter.prompts
     
     @property
-    def tools(self) -> List[BaseTool]:
+    def tools(self) -> list[BaseTool]:
         """Ritorna la lista dei tools convertiti"""
         return self._tools
     
     @property
-    def resources(self) -> List[BaseTool]:
+    def resources(self) -> list[BaseTool]:
         """Ritorna la lista delle risorse convertite"""
         return self._resources
     
     @property
-    def prompts(self) -> List[BaseTool]:
+    def prompts(self) -> list[BaseTool]:
         """Ritorna la lista dei prompt convertiti"""
         return self._prompts
     
     @property
-    def all_tools(self) -> List[BaseTool]:
+    def all_tools(self) -> list[BaseTool]:
         """Ritorna la lista unificata di tools, risorse e prompt"""
         return self._all_tools
     
