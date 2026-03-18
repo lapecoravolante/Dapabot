@@ -1,2 +1,2 @@
 libgl1
-libmagic1
+libmagic1 
