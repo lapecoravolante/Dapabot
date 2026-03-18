@@ -41,7 +41,6 @@ dependencies = [
     "rapidocr-onnxruntime>=1.4.4",
     "replicate>=1.0.7",
     "sentence-transformers>=5.1.2",
-    "sqlite-web>=0.6.8",
     "streamlit>=1.51.0",
     "uv>=0.10.2",
     "validators>=0.35.0",

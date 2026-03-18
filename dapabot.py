@@ -26,24 +26,24 @@ from src.gui_utils import inizializza, crea_sidebar, generate_response, mostra_c
 from src.providers.base import Provider
 
 # Avvia sqlite-web in background all'avvio dell'applicazione
-if "sqlite_web_process" not in st.session_state:
-    try:
-        # Avvia sqlite-web in background
-        # Flag -q: logga solo errori, non info di debug
-        process = subprocess.Popen(
-            ["sqlite_web", "config.db", "-q", "--host", "127.0.0.1", "--port", "6969"]
-        )
-        st.session_state.sqlite_web_process = process
+# if "sqlite_web_process" not in st.session_state:
+#     try:
+#         # Avvia sqlite-web in background
+#         # Flag -q: logga solo errori, non info di debug
+#         process = subprocess.Popen(
+#             ["sqlite_web", "config.db", "-q", "--host", "127.0.0.1", "--port", "6969"]
+#         )
+#         st.session_state.sqlite_web_process = process
         
-        # Registra la funzione per terminare il processo alla chiusura
-        def cleanup():
-            if "sqlite_web_process" in st.session_state:
-                st.session_state.sqlite_web_process.terminate()
+#         # Registra la funzione per terminare il processo alla chiusura
+#         def cleanup():
+#             if "sqlite_web_process" in st.session_state:
+#                 st.session_state.sqlite_web_process.terminate()
         
-        atexit.register(cleanup)
-    except Exception as e:
-        # Se sqlite-web non è disponibile, continua senza errori
-        pass
+#         atexit.register(cleanup)
+#     except Exception as e:
+#         # Se sqlite-web non è disponibile, continua senza errori
+#         pass
 
 st.title("🤖 DapaBot 🤖")
 providers = inizializza()

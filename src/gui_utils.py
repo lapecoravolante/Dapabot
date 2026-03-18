@@ -782,21 +782,7 @@ def crea_sidebar(providers: dict[str, Provider]):
                 st.session_state["vs_dialog_global_open"] = True
 
         # Salva configurazione e gestione DB (in fondo alla sidebar)
-        col_salva, col_db = st.columns(2)
-        with col_salva:
-            st.button("Salva configurazione", key="salva", on_click=salva_configurazione, args=[providers], use_container_width=True)
-        with col_db:
-            # Link per gestione avanzata DB config.db
-            # sqlite-web viene avviato automaticamente all'avvio dell'applicazione
-            url = "http://127.0.0.1:6969"
-            st.markdown(
-                f'<a href="{url}" target="_blank">'
-                '<button style="width:100%; padding:8px; font-size:1rem; border:1px solid #ccc; border-radius:4px; cursor:pointer; background-color:white;">'
-                '🔍 Gestione avanzata DB'
-                '</button></a>',
-                unsafe_allow_html=True
-            )
-        
+        st.button("Salva configurazione", key="salva", on_click=salva_configurazione, args=[providers], use_container_width=True)
         # Aggiorna provider runtime (usa i valori restituiti dai widget)
         try:
             provider.set_client(modello_scelto, api_key)
