@@ -1,2 +1,3 @@
 libgl1
-libmagic1 
+libmagic1=1:5.39-3+deb11u1
+libmagic-mgc=1:5.39-3+deb11u1
