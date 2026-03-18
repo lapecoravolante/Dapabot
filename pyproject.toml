@@ -47,5 +47,4 @@ dependencies = [
     "validators>=0.35.0",
     "fastmcp>=3.0.0",
     "beautifulsoup4>=4.14.3",
-    "python-magic-bin>=0.4.14",
 ]
