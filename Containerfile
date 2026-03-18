@@ -1,7 +1,7 @@
 FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim
 
 RUN apt-get update && \
-   apt-get install -y libgl1  libglib2.0-0 build-essential curl git && \
+   apt-get install -y libgl1  libglib2.0-0 build-essential curl git libmagic1 && \
    rm -rf /var/lib/apt/lists/*
 
 ENV APP_HOME="/app/dapabot"
@@ -13,7 +13,7 @@ COPY . ${APP_HOME}
 # Decommentare l'istruzione seguente per creare un'immagine di circa 9GB con tutte le dipendenze già scaricate.
 #RUN uv sync 
 
-# La porta 8501 è per streamlit mentre la 8080 è per sqlite-web
-EXPOSE 8501 8080
+# La porta 8501 è per streamlit mentre la 6969 è per sqlite-web
+EXPOSE 8501 6969
 
 ENTRYPOINT ["uv", "run", "streamlit", "run", "dapabot.py", "--server.port=8501", "--server.address=0.0.0.0"]
